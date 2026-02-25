@@ -4,7 +4,7 @@ import { Ticket, Sector, User, Status, Comment, Notification } from './types';
 import { 
   Plus, Search, Bell, User as UserIcon, LogOut, 
   MessageSquare, ChevronRight, Filter, Moon, Sun,
-  CheckCircle2, Clock, AlertCircle, Send, X, Shield, Settings, Mail, Lock
+  CheckCircle2, Clock, AlertCircle, Send, X, Shield, Settings, Mail, Lock, Paperclip, FileText, Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AdminPanel } from './components/AdminPanel';
@@ -138,8 +138,34 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
     title: '',
     description: '',
     executor_sector_id: '',
-    executor_id: ''
+    executor_id: '',
+    attachments: [] as string[]
   });
+  const [uploading, setUploading] = useState(false);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    const body = new FormData();
+    body.append('file', file);
+
+    try {
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body
+      });
+      const data = await res.json();
+      if (data.url) {
+        setFormData(prev => ({ ...prev, attachments: [...prev.attachments, data.url] }));
+      }
+    } catch (err) {
+      console.error("Upload failed:", err);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   useEffect(() => {
     fetch(`/api/sectors?tenant_id=${user?.tenant_id}`).then(res => res.json()).then(setSectors);
@@ -234,6 +260,29 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
               className="w-full p-2 border rounded-lg bg-background resize-none"
             />
           </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Anexos</label>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {formData.attachments.map((url, i) => (
+                <div key={i} className="flex items-center gap-2 bg-muted p-2 rounded-lg text-xs">
+                  <FileText size={14} />
+                  <span className="truncate max-w-[100px]">Anexo {i + 1}</span>
+                  <button 
+                    type="button" 
+                    onClick={() => setFormData(prev => ({ ...prev, attachments: prev.attachments.filter((_, idx) => idx !== i) }))}
+                    className="hover:text-destructive"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed rounded-xl cursor-pointer hover:bg-muted/50 transition-colors">
+              <Paperclip size={18} className={uploading ? 'animate-pulse' : ''} />
+              <span className="text-sm font-medium">{uploading ? 'Enviando...' : 'Adicionar Anexo'}</span>
+              <input type="file" className="hidden" onChange={handleFileUpload} disabled={uploading} />
+            </label>
+          </div>
           <div className="flex justify-end gap-3 pt-4">
             <button type="button" onClick={onClose} className="px-4 py-2 hover:bg-muted rounded-lg transition-colors">Cancelar</button>
             <button type="submit" className="px-6 py-2 bg-primary text-primary-foreground rounded-lg font-semibold hover:opacity-90 transition-opacity">Criar Ticket</button>
@@ -249,6 +298,8 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
+  const [commentAttachments, setCommentAttachments] = useState<string[]>([]);
+  const [uploadingComment, setUploadingComment] = useState(false);
   const [statuses, setStatuses] = useState<Status[]>([]);
   const [mentionUsers, setMentionUsers] = useState<User[]>([]);
   const [showMentions, setShowMentions] = useState(false);
@@ -265,15 +316,44 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
 
   const handleComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newComment.trim()) return;
+    if (!newComment.trim() && commentAttachments.length === 0) return;
     const res = await fetch(`/api/tickets/${ticketId}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: user?.id, content: newComment }),
+      body: JSON.stringify({ 
+        user_id: user?.id, 
+        content: newComment,
+        attachments: commentAttachments
+      }),
     });
     if (res.ok) {
       setNewComment('');
+      setCommentAttachments([]);
       fetchTicket();
+    }
+  };
+
+  const handleCommentFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingComment(true);
+    const body = new FormData();
+    body.append('file', file);
+
+    try {
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body
+      });
+      const data = await res.json();
+      if (data.url) {
+        setCommentAttachments(prev => [...prev, data.url]);
+      }
+    } catch (err) {
+      console.error("Upload failed:", err);
+    } finally {
+      setUploadingComment(false);
     }
   };
 
@@ -361,6 +441,23 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
           <div className="bg-muted/20 p-4 rounded-xl border">
             <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">Descrição</h3>
             <p className="text-sm whitespace-pre-wrap">{ticket.description}</p>
+            {ticket.attachments && ticket.attachments.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {ticket.attachments.map((url, i) => (
+                  <a 
+                    key={i} 
+                    href={url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 bg-background border p-2 rounded-lg text-xs hover:bg-muted transition-colors"
+                  >
+                    <FileText size={14} />
+                    <span>Anexo {i + 1}</span>
+                    <Download size={14} className="opacity-50" />
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="space-y-4">
@@ -378,6 +475,24 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
                       <span className="text-[10px] opacity-50">{new Date(c.created_at).toLocaleTimeString()}</span>
                     </div>
                     <p className="text-sm">{c.content.replace(/@\[([^\]]+)\]\(\d+\)/g, '@$1')}</p>
+                    {c.attachments && c.attachments.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {c.attachments.map((url, i) => (
+                          <a 
+                            key={i} 
+                            href={url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className={`flex items-center gap-2 p-2 rounded-lg text-[10px] border transition-colors ${
+                              c.user_id === user?.id ? 'bg-primary-foreground/10 border-primary-foreground/20 hover:bg-primary-foreground/20' : 'bg-muted border-transparent hover:bg-muted/80'
+                            }`}
+                          >
+                            <FileText size={12} />
+                            <span>Anexo {i + 1}</span>
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -411,16 +526,39 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
           )}
 
           <form onSubmit={handleComment} className="relative">
-            <textarea
-              value={newComment}
-              onChange={onCommentChange}
-              placeholder="Digite seu comentário... Use @ para mencionar"
-              className="w-full p-3 pr-12 rounded-xl border bg-background resize-none focus:ring-2 focus:ring-primary outline-none"
-              rows={2}
-            />
-            <button type="submit" className="absolute right-3 bottom-3 p-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity">
-              <Send size={18}/>
-            </button>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {commentAttachments.map((url, i) => (
+                <div key={i} className="flex items-center gap-2 bg-muted p-2 rounded-lg text-[10px]">
+                  <FileText size={12} />
+                  <span className="truncate max-w-[80px]">Anexo {i + 1}</span>
+                  <button 
+                    type="button" 
+                    onClick={() => setCommentAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                    className="hover:text-destructive"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="relative">
+              <textarea
+                value={newComment}
+                onChange={onCommentChange}
+                placeholder="Digite seu comentário... Use @ para mencionar"
+                className="w-full p-3 pr-24 rounded-xl border bg-background resize-none focus:ring-2 focus:ring-primary outline-none"
+                rows={2}
+              />
+              <div className="absolute right-3 bottom-3 flex items-center gap-2">
+                <label className="p-2 hover:bg-muted rounded-lg cursor-pointer transition-colors">
+                  <Paperclip size={18} className={uploadingComment ? 'animate-pulse' : ''} />
+                  <input type="file" className="hidden" onChange={handleCommentFileUpload} disabled={uploadingComment} />
+                </label>
+                <button type="submit" className="p-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity">
+                  <Send size={18}/>
+                </button>
+              </div>
+            </div>
 
             <AnimatePresence>
               {showMentions && (

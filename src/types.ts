@@ -45,6 +45,7 @@ export interface Ticket {
   executor_sector_name: string;
   status_name: string;
   status_sequence: number;
+  attachments?: string[];
 }
 
 export interface Comment {
@@ -55,6 +56,7 @@ export interface Comment {
   type: 'user' | 'system';
   created_at: string;
   user_name: string;
+  attachments?: string[];
 }
 
 export interface Notification {

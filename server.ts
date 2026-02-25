@@ -2,9 +2,12 @@ import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import path from "path";
 import { fileURLToPath } from "url";
+import multer from "multer";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 console.log("Starting server with Supabase and Password Auth...");
 
@@ -27,6 +30,34 @@ async function startServer() {
   // Health check
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", time: new Date().toISOString(), provider: "supabase", auth: "password" });
+  });
+
+  // File Upload
+  app.post("/api/upload", upload.single("file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    const file = req.file;
+    const fileExt = path.extname(file.originalname);
+    const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}${fileExt}`;
+    const filePath = `uploads/${fileName}`;
+
+    const { data, error } = await supabase.storage
+      .from("attachments")
+      .upload(filePath, file.buffer, {
+        contentType: file.mimetype,
+        upsert: false
+      });
+
+    if (error) {
+      console.error("Storage error:", error);
+      return res.status(500).json({ error: "Erro ao fazer upload do arquivo." });
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from("attachments")
+      .getPublicUrl(filePath);
+
+    res.json({ url: publicUrl, name: file.originalname });
   });
 
   // --- API Routes ---
@@ -257,7 +288,7 @@ async function startServer() {
   });
 
   app.post("/api/tickets", async (req, res) => {
-    const { tenant_id, title, description, solicitor_id, executor_id, solicitor_sector_id, executor_sector_id } = req.body;
+    const { tenant_id, title, description, solicitor_id, executor_id, solicitor_sector_id, executor_sector_id, attachments } = req.body;
     
     if (solicitor_sector_id === executor_sector_id) {
       return res.status(400).json({ error: "Tickets must be intersectoral." });
@@ -280,7 +311,8 @@ async function startServer() {
       .insert({
         tenant_id, title, description, solicitor_id, executor_id, 
         solicitor_sector_id, executor_sector_id, status_id: firstStatus.id,
-        last_assigned_at: new Date().toISOString()
+        last_assigned_at: new Date().toISOString(),
+        attachments: attachments || []
       })
       .select()
       .single();
@@ -315,7 +347,7 @@ async function startServer() {
 
   app.post("/api/tickets/:id/comments", async (req, res) => {
     const { id } = req.params;
-    const { user_id, content, type } = req.body;
+    const { user_id, content, type, attachments } = req.body;
 
     const { data: ticket } = await supabase.from("tickets").select("*").eq("id", id).single();
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
@@ -340,7 +372,13 @@ async function startServer() {
 
     const { data: result, error } = await supabase
       .from("comments")
-      .insert({ ticket_id: id, user_id, content, type: type || 'user' })
+      .insert({ 
+        ticket_id: id, 
+        user_id, 
+        content, 
+        type: type || 'user',
+        attachments: attachments || []
+      })
       .select()
       .single();
 
