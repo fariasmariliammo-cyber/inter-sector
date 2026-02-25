@@ -1,9 +1,7 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import { createClient } from "@supabase/supabase-js";
 import path from "path";
 import { fileURLToPath } from "url";
-import bcrypt from "bcryptjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -506,13 +504,14 @@ async function startServer() {
   });
 
   // --- Vite Middleware ---
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (!process.env.VERCEL) {
     app.use(express.static(path.join(__dirname, "dist")));
     app.get("*", (req, res) => {
       res.sendFile(path.join(__dirname, "dist", "index.html"));
