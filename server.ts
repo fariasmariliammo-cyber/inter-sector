@@ -461,6 +461,20 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.patch("/api/tenants/:id", async (req, res) => {
+    const { id } = req.params;
+    const { name, admin_id } = req.body;
+    
+    // Verify admin
+    const { data: user } = await supabase.from("users").select("role").eq("id", admin_id).single();
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
+
+    const { error } = await supabase.from("tenants").update({ name }).eq("id", id);
+    if (error) return res.status(400).json({ error: "Erro ao atualizar nome da empresa." });
+    
+    res.json({ success: true });
+  });
+
   // --- Admin Endpoints ---
   const isAdmin = async (user_id: any) => {
     const { data: user } = await supabase.from("users").select("role").eq("id", user_id).single();

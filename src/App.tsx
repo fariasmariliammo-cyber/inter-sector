@@ -590,6 +590,79 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
   );
 }
 
+function TenantNameModal({ tenantId, currentName, onUpdated }: { tenantId: number, currentName: string, onUpdated: (newName: string) => void }) {
+  const { user } = useAuth();
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || name === currentName) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/tenants/${tenantId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, admin_id: user?.id }),
+      });
+      if (res.ok) {
+        onUpdated(name);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-background/80 backdrop-blur-xl flex items-center justify-center z-[100] p-4">
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="bg-card w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl border-2 relative overflow-hidden"
+      >
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary/50 via-primary to-primary/50" />
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 text-primary mb-6">
+            <Settings size={32} />
+          </div>
+          <h2 className="text-3xl font-black tracking-tighter mb-2">Configure sua Empresa</h2>
+          <p className="text-muted-foreground text-sm">Para começar, informe o nome oficial da sua organização.</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground ml-1">Nome da Empresa</label>
+            <div className="relative group">
+              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary transition-colors">
+                <Shield size={18} />
+              </div>
+              <input
+                required
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="Ex: Minha Empresa LTDA"
+                className="w-full pl-12 pr-4 py-4 bg-muted/30 border-2 border-transparent focus:border-primary/20 focus:bg-background rounded-2xl outline-none transition-all font-medium"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading || !name.trim()}
+            className="w-full py-4 bg-primary text-primary-foreground rounded-2xl font-bold text-lg shadow-lg shadow-primary/20 hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+          >
+            {loading ? 'Salvando...' : 'Confirmar e Iniciar'}
+            {!loading && <ChevronRight size={20} />}
+          </button>
+        </form>
+      </motion.div>
+    </div>
+  );
+}
+
 function Dashboard() {
   const { user, logout } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -600,6 +673,7 @@ function Dashboard() {
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>(user?.theme || 'light');
   const [view, setView] = useState<'tickets' | 'admin'>('tickets');
+  const [showTenantModal, setShowTenantModal] = useState(false);
   
   const [filters, setFilters] = useState({
     sector_solicitor: '',
@@ -608,14 +682,34 @@ function Dashboard() {
     search: ''
   });
 
+  useEffect(() => {
+    if (user && user.role === 'admin' && user.tenant_name?.startsWith('Empresa de ')) {
+      setShowTenantModal(true);
+    }
+  }, [user]);
+
+  const handleTenantUpdated = (newName: string) => {
+    if (user) {
+      const updatedUser = { ...user, tenant_name: newName };
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      window.location.reload(); // Reload to refresh all context with new name
+    }
+  };
+
   const fetchWithRetry = async (url: string, options?: RequestInit, retries = 3): Promise<any> => {
     try {
       const res = await fetch(url, options);
+      if (res.status === 429) {
+        console.warn("Rate limited (429). Waiting before retry...");
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        if (retries > 0) return fetchWithRetry(url, options, retries - 1);
+        throw new Error("Too many requests. Please try again later.");
+      }
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       return await res.json();
     } catch (err) {
-      if (retries > 0) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      if (retries > 0 && !(err instanceof Error && err.message.includes("429"))) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
         return fetchWithRetry(url, options, retries - 1);
       }
       throw err;
@@ -672,6 +766,13 @@ function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
+      {showTenantModal && user && (
+        <TenantNameModal 
+          tenantId={user.tenant_id} 
+          currentName={user.tenant_name || ''} 
+          onUpdated={handleTenantUpdated} 
+        />
+      )}
       {/* Header */}
       <header className="sticky top-0 z-40 w-full border-b bg-background/80 backdrop-blur-md">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
