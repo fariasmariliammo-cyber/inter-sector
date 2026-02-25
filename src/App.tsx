@@ -4,24 +4,28 @@ import { Ticket, Sector, User, Status, Comment, Notification } from './types';
 import { 
   Plus, Search, Bell, User as UserIcon, LogOut, 
   MessageSquare, ChevronRight, Filter, Moon, Sun,
-  CheckCircle2, Clock, AlertCircle, Send, X, Shield, Settings, Mail
+  CheckCircle2, Clock, AlertCircle, Send, X, Shield, Settings, Mail, Lock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AdminPanel } from './components/AdminPanel';
 
 function Login() {
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
-  const { login } = useAuth();
+  const { login, signup } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await login(email);
-    } catch (err) {
-      alert(isRegistering 
-        ? 'E-mail não encontrado nos convites. Verifique com seu administrador.' 
-        : 'Login falhou. Verifique seu e-mail ou use o botão de Primeiro Acesso.');
+      if (isRegistering) {
+        await signup(email, name, password);
+      } else {
+        await login(email, password);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Ocorreu um erro. Tente novamente.');
     }
   };
 
@@ -45,14 +49,33 @@ function Login() {
             </div>
             <h1 className="text-4xl font-black tracking-tighter mb-2">InterSector</h1>
             <p className="text-muted-foreground font-medium">
-              {isRegistering ? 'Ative seu convite' : 'Bem-vindo de volta'}
+              {isRegistering ? 'Crie sua conta e organização' : 'Bem-vindo de volta'}
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            {isRegistering && (
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">
+                  Seu Nome
+                </label>
+                <div className="relative">
+                  <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full p-4 pl-12 rounded-2xl border bg-background focus:ring-2 focus:ring-primary outline-none transition-all font-medium"
+                    placeholder="Seu nome completo"
+                    required={isRegistering}
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">
-                E-mail Corporativo
+                E-mail
               </label>
               <div className="relative">
                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
@@ -61,8 +84,26 @@ function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full p-4 pl-12 rounded-2xl border bg-background focus:ring-2 focus:ring-primary outline-none transition-all font-medium"
-                  placeholder="seu@empresa.com"
+                  placeholder="seu@email.com"
                   required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">
+                Senha
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full p-4 pl-12 rounded-2xl border bg-background focus:ring-2 focus:ring-primary outline-none transition-all font-medium"
+                  placeholder="••••••••"
+                  required
+                  minLength={6}
                 />
               </div>
             </div>
@@ -71,32 +112,17 @@ function Login() {
               type="submit"
               className="w-full py-4 bg-primary text-primary-foreground rounded-2xl font-black uppercase tracking-widest hover:opacity-90 transition-all shadow-lg shadow-primary/20 active:scale-[0.98]"
             >
-              {isRegistering ? 'Ativar Acesso' : 'Entrar'}
+              {isRegistering ? 'Cadastrar e Criar Empresa' : 'Entrar'}
             </button>
           </form>
 
-          <div className="mt-8 pt-8 border-t flex flex-col gap-4">
+          <div className="mt-8 pt-8 border-t flex flex-col gap-4 text-center">
             <button 
               onClick={() => setIsRegistering(!isRegistering)}
               className="text-sm font-bold text-primary hover:underline transition-all"
             >
-              {isRegistering ? 'Já possui acesso? Faça login' : 'Primeiro acesso? Cadastre seu convite'}
+              {isRegistering ? 'Já possui acesso? Faça login' : 'Não tem conta? Cadastre-se agora'}
             </button>
-            
-            <div className="bg-muted/30 p-4 rounded-2xl">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 text-center">Contas de Demonstração</p>
-              <div className="flex flex-wrap justify-center gap-2">
-                {['admin@alpha.com', 'dev1@alpha.com', 'rh@alpha.com'].map(demo => (
-                  <button 
-                    key={demo}
-                    onClick={() => setEmail(demo)}
-                    className="px-2 py-1 bg-background border rounded-lg text-[10px] font-mono hover:border-primary transition-colors"
-                  >
-                    {demo}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       </motion.div>

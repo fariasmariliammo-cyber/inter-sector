@@ -3,7 +3,8 @@ import { User } from './types';
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  signup: (email: string, name: string, password: string) => Promise<void>;
   logout: () => void;
   loading: boolean;
 }
@@ -22,25 +23,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, []);
 
-  const login = async (email: string, retries = 3) => {
+  const login = async (email: string, password: string, retries = 3) => {
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, password }),
       });
       if (res.ok) {
         const userData = await res.json();
         setUser(userData);
         localStorage.setItem('user', JSON.stringify(userData));
       } else {
-        throw new Error('Login failed');
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Login failed');
       }
     } catch (err) {
-      if (retries > 0) {
+      if (retries > 0 && err instanceof Error && err.message === 'Failed to fetch') {
         await new Promise(resolve => setTimeout(resolve, 1000));
-        return login(email, retries - 1);
+        return login(email, password, retries - 1);
       }
+      throw err;
+    }
+  };
+
+  const signup = async (email: string, name: string, password: string) => {
+    try {
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, name, password }),
+      });
+      if (res.ok) {
+        // After signup, we can automatically log them in
+        await login(email, password);
+      } else {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Signup failed');
+      }
+    } catch (err) {
       throw err;
     }
   };
@@ -51,7 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, login, signup, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );
