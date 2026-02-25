@@ -265,7 +265,7 @@ export function AdminPanel() {
                 </div>
                 
                 <div className="space-y-2">
-                  <label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">E-mail Corporativo</label>
+                  <label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">E-mail</label>
                   <div className="relative">
                     <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
                     <input

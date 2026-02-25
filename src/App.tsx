@@ -112,7 +112,7 @@ function Login() {
               type="submit"
               className="w-full py-4 bg-primary text-primary-foreground rounded-2xl font-black uppercase tracking-widest hover:opacity-90 transition-all shadow-lg shadow-primary/20 active:scale-[0.98]"
             >
-              {isRegistering ? 'Cadastrar e Criar Empresa' : 'Entrar'}
+              {isRegistering ? 'Cadastrar' : 'Entrar'}
             </button>
           </form>
 
