@@ -4,7 +4,7 @@ import { Ticket, Sector, User, Status, Comment, Notification } from './types';
 import { 
   Plus, Search, Bell, User as UserIcon, LogOut, 
   MessageSquare, ChevronRight, Filter, Moon, Sun,
-  CheckCircle2, Clock, AlertCircle, Send, X, Shield, Settings, Mail, Lock, Paperclip, FileText, Download
+  CheckCircle2, Clock, AlertCircle, Send, X, Shield, Settings, Mail, Lock, Paperclip, FileText, Download, Edit
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AdminPanel } from './components/AdminPanel';
@@ -181,14 +181,23 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user?.tenant_id || !user?.id || !user?.sector_id) {
+      alert("Erro: Dados do usuário não carregados completamente.");
+      return;
+    }
+
     const res = await fetch('/api/tickets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        ...formData,
-        tenant_id: user?.tenant_id,
-        solicitor_id: user?.id,
-        solicitor_sector_id: user?.sector_id
+        title: formData.title,
+        description: formData.description,
+        attachments: formData.attachments,
+        executor_sector_id: formData.executor_sector_id ? Number(formData.executor_sector_id) : null,
+        executor_id: formData.executor_id ? Number(formData.executor_id) : null,
+        tenant_id: user.tenant_id,
+        solicitor_id: user.id,
+        solicitor_sector_id: user.sector_id
       }),
     });
     if (res.ok) {
@@ -196,7 +205,8 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
       onClose();
     } else {
       const data = await res.json();
-      alert(data.error);
+      console.error("Ticket creation failed:", data);
+      alert(`Erro ao criar ticket: ${data.error || 'Erro desconhecido'}`);
     }
   };
 
@@ -236,9 +246,8 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Executor</label>
+            <label className="block text-sm font-medium mb-1">Executor (Opcional)</label>
             <select
-              required
               value={formData.executor_id}
               onChange={e => setFormData({...formData, executor_id: e.target.value})}
               className="w-full p-2 border rounded-lg bg-background"
@@ -303,9 +312,20 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
   const [statuses, setStatuses] = useState<Status[]>([]);
   const [mentionUsers, setMentionUsers] = useState<User[]>([]);
   const [showMentions, setShowMentions] = useState(false);
+  
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editAttachments, setEditAttachments] = useState<string[]>([]);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const fetchTicket = () => {
-    fetch(`/api/tickets/${ticketId}`).then(res => res.json()).then(setTicket);
+    fetch(`/api/tickets/${ticketId}`).then(res => res.json()).then(data => {
+      setTicket(data);
+      setEditTitle(data.title);
+      setEditDescription(data.description);
+      setEditAttachments(data.attachments || []);
+    });
     fetch(`/api/tickets/${ticketId}/comments?user_id=${user?.id}`).then(res => res.json()).then(setComments);
   };
 
@@ -374,21 +394,55 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
     }
   };
 
-  const handleReassign = async (newExecutorId: string) => {
-    if (!newExecutorId) return;
-    const res = await fetch(`/api/tickets/${ticketId}/reassign`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ executor_id: newExecutorId, user_id: user?.id }),
-    });
-    if (res.ok) fetchTicket();
-  };
-
   const handleMention = (u: User) => {
     const lastAt = newComment.lastIndexOf('@');
     const text = newComment.substring(0, lastAt) + `@[${u.name}](${u.id}) `;
     setNewComment(text);
     setShowMentions(false);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editTitle.trim() || !editDescription.trim()) return;
+    setIsSavingEdit(true);
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user?.id,
+          title: editTitle,
+          description: editDescription,
+          attachments: editAttachments
+        }),
+      });
+      if (res.ok) {
+        setIsEditing(false);
+        fetchTicket();
+      } else {
+        const data = await res.json();
+        alert(data.error);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleEditFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const body = new FormData();
+    body.append('file', file);
+
+    try {
+      const res = await fetch('/api/upload', { method: 'POST', body });
+      const data = await res.json();
+      if (data.url) setEditAttachments(prev => [...prev, data.url]);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const onCommentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -423,14 +477,29 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
               <span>{new Date(ticket.created_at).toLocaleString()}</span>
             </div>
             <h2 className="text-2xl font-bold tracking-tight">{ticket.title}</h2>
-            <div className="flex gap-4 mt-2 text-sm">
-              <span className="flex items-center gap-1"><UserIcon size={14}/> {ticket.solicitor_name} ({ticket.solicitor_sector_name})</span>
-              <ChevronRight size={14} className="mt-1 opacity-50"/>
-              <span className="flex items-center gap-1"><UserIcon size={14}/> {ticket.executor_name} ({ticket.executor_sector_name})</span>
-            </div>
+              <div className="flex gap-4 mt-2 text-sm">
+                <span className="flex items-center gap-1"><UserIcon size={14}/> {ticket.solicitor_name} ({ticket.solicitor_sector_name})</span>
+                <ChevronRight size={14} className="mt-1 opacity-50"/>
+                <span className="flex items-center gap-1">
+                  <UserIcon size={14}/> 
+                  {ticket.executor_name || 'Não atribuído'} 
+                  {ticket.executor_sector_name ? ` (${ticket.executor_sector_name})` : ' (Sem setor)'}
+                </span>
+              </div>
           </div>
           <div className="flex flex-col items-end gap-2">
-            <button onClick={onClose} className="p-2 hover:bg-muted rounded-full transition-colors"><X size={20}/></button>
+            <div className="flex items-center gap-2">
+              {(user?.role === 'admin' || user?.id === ticket.solicitor_id) && !isEditing && (
+                <button 
+                  onClick={() => setIsEditing(true)}
+                  className="p-2 hover:bg-primary/10 text-primary rounded-full transition-colors"
+                  title="Editar Ticket"
+                >
+                  <Edit size={18}/>
+                </button>
+              )}
+              <button onClick={onClose} className="p-2 hover:bg-muted rounded-full transition-colors"><X size={20}/></button>
+            </div>
             <div className="px-3 py-1 bg-primary/10 text-primary rounded-full text-xs font-bold uppercase tracking-wider">
               {ticket.status_name}
             </div>
@@ -438,27 +507,87 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8">
-          <div className="bg-muted/20 p-4 rounded-xl border">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">Descrição</h3>
-            <p className="text-sm whitespace-pre-wrap">{ticket.description}</p>
-            {ticket.attachments && ticket.attachments.length > 0 && (
-              <div className="mt-4 flex flex-wrap gap-2">
-                {ticket.attachments.map((url, i) => (
-                  <a 
-                    key={i} 
-                    href={url} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 bg-background border p-2 rounded-lg text-xs hover:bg-muted transition-colors"
-                  >
-                    <FileText size={14} />
-                    <span>Anexo {i + 1}</span>
-                    <Download size={14} className="opacity-50" />
-                  </a>
-                ))}
+          {isEditing ? (
+            <div className="space-y-6 bg-muted/20 p-6 rounded-2xl border-2 border-primary/20">
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Título do Ticket</label>
+                <input 
+                  type="text"
+                  value={editTitle}
+                  onChange={e => setEditTitle(e.target.value)}
+                  className="w-full p-3 rounded-xl border bg-background focus:ring-2 focus:ring-primary outline-none"
+                />
               </div>
-            )}
-          </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Descrição Detalhada</label>
+                <textarea 
+                  value={editDescription}
+                  onChange={e => setEditDescription(e.target.value)}
+                  className="w-full p-3 rounded-xl border bg-background focus:ring-2 focus:ring-primary outline-none min-h-[150px]"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Anexos</label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {editAttachments.map((url, i) => (
+                    <div key={i} className="flex items-center gap-2 bg-background border p-2 rounded-lg text-xs">
+                      <FileText size={14} />
+                      <span className="truncate max-w-[150px]">Anexo {i + 1}</span>
+                      <button 
+                        type="button" 
+                        onClick={() => setEditAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                        className="text-destructive hover:bg-destructive/10 p-1 rounded"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <label className="inline-flex items-center gap-2 px-4 py-2 bg-background border-2 border-dashed rounded-xl text-sm cursor-pointer hover:bg-muted transition-colors">
+                  <Paperclip size={16} />
+                  <span>Adicionar Anexo</span>
+                  <input type="file" className="hidden" onChange={handleEditFileUpload} />
+                </label>
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button 
+                  onClick={handleSaveEdit}
+                  disabled={isSavingEdit}
+                  className="flex-1 py-3 bg-primary text-primary-foreground rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
+                >
+                  {isSavingEdit ? 'Salvando...' : 'Salvar Alterações'}
+                </button>
+                <button 
+                  onClick={() => setIsEditing(false)}
+                  className="px-6 py-3 bg-muted rounded-xl font-bold hover:bg-muted/80 transition-colors"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-muted/20 p-4 rounded-xl border">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">Descrição</h3>
+              <p className="text-sm whitespace-pre-wrap">{ticket.description}</p>
+              {ticket.attachments && ticket.attachments.length > 0 && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {ticket.attachments.map((url, i) => (
+                    <a 
+                      key={i} 
+                      href={url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 bg-background border p-2 rounded-lg text-xs hover:bg-muted transition-colors"
+                    >
+                      <FileText size={14} />
+                      <span>Anexo {i + 1}</span>
+                      <Download size={14} className="opacity-50" />
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="space-y-4">
             <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Histórico e Comentários</h3>
@@ -501,21 +630,6 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
         </div>
 
         <div className="p-6 border-t bg-muted/10 space-y-4">
-          {user?.role === 'admin' && (
-            <div className="flex gap-2">
-              <select 
-                className="flex-1 p-2 border rounded-lg bg-background text-sm"
-                onChange={(e) => handleReassign(e.target.value)}
-                defaultValue=""
-              >
-                <option value="" disabled>Reatribuir executor...</option>
-                {mentionUsers.map(u => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
           {nextStatus && (user?.id === ticket.executor_id || user?.role === 'admin') && (
             <button 
               onClick={handleNextStatus}
@@ -922,9 +1036,11 @@ function Dashboard() {
                   <span className="font-medium">{t.solicitor_sector_name}</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs">
-                  <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold">{t.executor_name[0]}</div>
+                  <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold">
+                    {t.executor_name ? t.executor_name[0] : '?'}
+                  </div>
                   <span className="text-muted-foreground">Para:</span>
-                  <span className="font-medium">{t.executor_sector_name}</span>
+                  <span className="font-medium">{t.executor_sector_name || 'Não atribuído'}</span>
                 </div>
               </div>
 

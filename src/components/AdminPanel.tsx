@@ -38,18 +38,47 @@ export function AdminPanel() {
   
   const [isSubmittingSector, setIsSubmittingSector] = useState(false);
   const [isSubmittingUser, setIsSubmittingUser] = useState(false);
+  const [deletingSectorId, setDeletingSectorId] = useState<number | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<number | null>(null);
+  const [confirmDeleteSector, setConfirmDeleteSector] = useState<number | null>(null);
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState<number | null>(null);
+  const [sectorError, setSectorError] = useState<{ id: number, message: string } | null>(null);
+  const [userError, setUserError] = useState<{ id: number, message: string } | null>(null);
   const [feedback, setFeedback] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
 
   const fetchData = async () => {
+    if (!user?.tenant_id || !user?.id) return;
+    
     try {
       const [sRes, uRes] = await Promise.all([
-        fetch(`/api/sectors?tenant_id=${user?.tenant_id}`),
-        fetch(`/api/admin/users?tenant_id=${user?.tenant_id}&admin_id=${user?.id}`)
+        fetch(`/api/sectors?tenant_id=${user.tenant_id}`),
+        fetch(`/api/admin/users?tenant_id=${user.tenant_id}&admin_id=${user.id}`)
       ]);
-      setSectors(await sRes.json());
-      setUsers(await uRes.json());
-    } catch (err) {
+
+      let sData, uData;
+      
+      try {
+        sData = await sRes.json();
+      } catch (e) {
+        if (!sRes.ok) throw new Error(`Erro no servidor de setores (${sRes.status})`);
+        throw new Error("Resposta inválida do servidor de setores.");
+      }
+
+      try {
+        uData = await uRes.json();
+      } catch (e) {
+        if (!uRes.ok) throw new Error(`Erro no servidor de usuários (${uRes.status})`);
+        throw new Error("Resposta inválida do servidor de usuários.");
+      }
+
+      if (!sRes.ok) throw new Error(sData.error || `Erro ao buscar setores (${sRes.status})`);
+      if (!uRes.ok) throw new Error(uData.error || `Erro ao buscar usuários (${uRes.status})`);
+
+      setSectors(sData);
+      setUsers(uData);
+    } catch (err: any) {
       console.error("Erro ao carregar dados do painel admin:", err);
+      setFeedback({ message: err.message || 'Erro ao carregar dados.', type: 'error' });
     }
   };
 
@@ -111,39 +140,67 @@ export function AdminPanel() {
     }
   };
 
-  const handleDeleteSector = async (id: number) => {
-    if (!confirm('Tem certeza que deseja excluir este setor?')) return;
+  const handleDeleteSector = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    setSectorError(null);
+    console.log("Delete sector requested for ID:", id);
+    if (confirmDeleteSector !== id) {
+      setConfirmDeleteSector(id);
+      setTimeout(() => setConfirmDeleteSector(null), 3000);
+      return;
+    }
+    
+    setDeletingSectorId(id);
+    setConfirmDeleteSector(null);
     try {
-      const res = await fetch(`/api/admin/sectors/${id}?admin_id=${user?.id}`, {
-        method: 'DELETE',
-      });
+      const url = `/api/admin/sectors/${id}?admin_id=${user?.id}`;
+      const res = await fetch(url, { method: 'DELETE' });
       if (res.ok) {
         setFeedback({ message: 'Setor excluído com sucesso!', type: 'success' });
         fetchData();
       } else {
         const data = await res.json();
-        setFeedback({ message: data.error || 'Erro ao excluir setor.', type: 'error' });
+        const errorMsg = data.error || 'Erro ao excluir setor.';
+        setSectorError({ id, message: errorMsg });
+        setTimeout(() => setSectorError(null), 5000);
       }
     } catch (err) {
-      setFeedback({ message: 'Erro de conexão.', type: 'error' });
+      setSectorError({ id, message: 'Erro de conexão.' });
+      setTimeout(() => setSectorError(null), 5000);
+    } finally {
+      setDeletingSectorId(null);
     }
   };
 
-  const handleDeleteUser = async (id: number) => {
-    if (!confirm('Tem certeza que deseja excluir este usuário?')) return;
+  const handleDeleteUser = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    setUserError(null);
+    console.log("Delete user requested for ID:", id);
+    if (confirmDeleteUser !== id) {
+      setConfirmDeleteUser(id);
+      setTimeout(() => setConfirmDeleteUser(null), 3000);
+      return;
+    }
+
+    setDeletingUserId(id);
+    setConfirmDeleteUser(null);
     try {
-      const res = await fetch(`/api/admin/users/${id}?admin_id=${user?.id}`, {
-        method: 'DELETE',
-      });
+      const url = `/api/admin/users/${id}?admin_id=${user?.id}`;
+      const res = await fetch(url, { method: 'DELETE' });
       if (res.ok) {
         setFeedback({ message: 'Usuário excluído com sucesso!', type: 'success' });
         fetchData();
       } else {
         const data = await res.json();
-        setFeedback({ message: data.error || 'Erro ao excluir usuário.', type: 'error' });
+        const errorMsg = data.error || 'Erro ao excluir usuário.';
+        setUserError({ id, message: errorMsg });
+        setTimeout(() => setUserError(null), 5000);
       }
     } catch (err) {
-      setFeedback({ message: 'Erro de conexão.', type: 'error' });
+      setUserError({ id, message: 'Erro de conexão.' });
+      setTimeout(() => setUserError(null), 5000);
+    } finally {
+      setDeletingUserId(null);
     }
   };
 
@@ -211,15 +268,43 @@ export function AdminPanel() {
                     <div className="w-2 h-2 rounded-full bg-primary/40 group-hover:bg-primary transition-colors" />
                     <span className="font-semibold">{s.name}</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => handleDeleteSector(s.id)}
-                      className="p-2 text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                      title="Excluir Setor"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                    <ChevronRight size={16} className="text-muted-foreground/30 group-hover:text-primary transition-colors" />
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={(e) => handleDeleteSector(e, s.id)}
+                        disabled={deletingSectorId === s.id}
+                        className={`p-2 rounded-lg transition-all flex items-center gap-1 ${
+                          confirmDeleteSector === s.id 
+                            ? 'bg-destructive text-destructive-foreground px-3' 
+                            : 'text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10'
+                        }`}
+                        title={confirmDeleteSector === s.id ? "Clique para confirmar" : "Excluir Setor"}
+                      >
+                        {deletingSectorId === s.id ? (
+                          <Loader2 size={16} className="animate-spin" />
+                        ) : confirmDeleteSector === s.id ? (
+                          <>
+                            <Trash2 size={14} />
+                            <span className="text-[10px] font-bold uppercase">Confirmar?</span>
+                          </>
+                        ) : (
+                          <Trash2 size={16} />
+                        )}
+                      </button>
+                      <ChevronRight size={16} className="text-muted-foreground/30 group-hover:text-primary transition-colors" />
+                    </div>
+                    <AnimatePresence>
+                      {sectorError?.id === s.id && (
+                        <motion.div
+                          initial={{ opacity: 0, x: 10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: 10 }}
+                          className="text-[10px] font-bold text-destructive bg-destructive/10 px-2 py-1 rounded-md max-w-[200px] text-right"
+                        >
+                          {sectorError.message}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 </motion.div>
               ))}
@@ -363,15 +448,43 @@ export function AdminPanel() {
                           </div>
                         </td>
                         <td className="p-6 text-right">
-                          {u.id !== user?.id && u.role !== 'admin' && (
-                            <button 
-                              onClick={() => handleDeleteUser(u.id)}
-                              className="p-2 text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10 rounded-xl transition-all opacity-0 group-hover:opacity-100"
-                              title="Excluir Usuário"
-                            >
-                              <Trash2 size={18} />
-                            </button>
-                          )}
+                          <div className="flex flex-col items-end gap-2">
+                            {u.id !== user?.id && u.role !== 'admin' && (
+                              <button 
+                                onClick={(e) => handleDeleteUser(e, u.id)}
+                                disabled={deletingUserId === u.id}
+                                className={`p-2 rounded-xl transition-all flex items-center gap-1 ml-auto ${
+                                  confirmDeleteUser === u.id 
+                                    ? 'bg-destructive text-destructive-foreground px-4' 
+                                    : 'text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10'
+                                }`}
+                                title={confirmDeleteUser === u.id ? "Clique para confirmar" : "Excluir Usuário"}
+                              >
+                                {deletingUserId === u.id ? (
+                                  <Loader2 size={18} className="animate-spin" />
+                                ) : confirmDeleteUser === u.id ? (
+                                  <>
+                                    <Trash2 size={16} />
+                                    <span className="text-xs font-bold uppercase">Confirmar?</span>
+                                  </>
+                                ) : (
+                                  <Trash2 size={18} />
+                                )}
+                              </button>
+                            )}
+                            <AnimatePresence>
+                              {userError?.id === u.id && (
+                                <motion.div
+                                  initial={{ opacity: 0, y: 5 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  exit={{ opacity: 0, y: 5 }}
+                                  className="text-[10px] font-bold text-destructive bg-destructive/10 px-2 py-1 rounded-md max-w-[200px]"
+                                >
+                                  {userError.message}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
                         </td>
                       </tr>
                     ))}

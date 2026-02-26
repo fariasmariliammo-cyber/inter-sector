@@ -12,8 +12,14 @@ const upload = multer({ storage: multer.memoryStorage() });
 console.log("Starting server with Supabase and Password Auth...");
 
 const supabaseUrl = process.env.SUPABASE_URL || "https://xelljsgmkdpjwyhhvssn.supabase.co";
-const supabaseKey = process.env.SUPABASE_ANON_KEY || "sb_publishable_9xDXZvxyUwHeuwl_XZ0SUw_SI-zMklI";
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "sb_publishable_9xDXZvxyUwHeuwl_XZ0SUw_SI-zMklI";
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+console.log("Supabase initialized with URL:", supabaseUrl);
+console.log("Supabase Key type:", process.env.SUPABASE_SERVICE_ROLE_KEY ? "SERVICE_ROLE" : "ANON/OTHER");
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn("WARNING: SUPABASE_SERVICE_ROLE_KEY is missing. Admin routes may fail if RLS is enabled.");
+}
 
 process.on("uncaughtException", (err) => {
   console.error("Uncaught Exception:", err);
@@ -32,6 +38,35 @@ async function startServer() {
     res.json({ status: "ok", time: new Date().toISOString(), provider: "supabase", auth: "password" });
   });
 
+  // Ensure storage bucket exists
+  const initStorage = async () => {
+    try {
+      const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+      if (listError) {
+        console.error("Error listing buckets:", listError);
+        return;
+      }
+      const exists = buckets && buckets.some(b => b.name === 'attachments');
+      if (!exists) {
+        console.log("Creating 'attachments' bucket...");
+        const { error: createError } = await supabase.storage.createBucket('attachments', {
+          public: true,
+          fileSizeLimit: 10 * 1024 * 1024, // 10MB
+        });
+        if (createError) {
+          console.error("Error creating bucket:", createError);
+        } else {
+          console.log("'attachments' bucket created successfully.");
+        }
+      } else {
+        console.log("'attachments' bucket already exists.");
+      }
+    } catch (e) {
+      console.error("Storage initialization failed:", e);
+    }
+  };
+  initStorage();
+
   // File Upload
   app.post("/api/upload", upload.single("file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
@@ -49,8 +84,11 @@ async function startServer() {
       });
 
     if (error) {
-      console.error("Storage error:", error);
-      return res.status(500).json({ error: "Erro ao fazer upload do arquivo." });
+      console.error("Storage upload error details:", JSON.stringify(error, null, 2));
+      if ((error as any).status === 404 || (error as any).message?.includes("not found")) {
+        return res.status(500).json({ error: "Bucket de armazenamento 'attachments' não encontrado. Por favor, verifique se ele foi criado no Supabase." });
+      }
+      return res.status(500).json({ error: "Erro ao fazer upload do arquivo para o storage." });
     }
 
     const { data: { publicUrl } } = supabase.storage
@@ -194,7 +232,9 @@ async function startServer() {
   app.get("/api/users", async (req, res) => {
     const { tenant_id, sector_id } = req.query;
     let query = supabase.from("users").select("id, name, email, sector_id").eq("tenant_id", tenant_id);
-    if (sector_id) query = query.eq("sector_id", sector_id);
+    if (sector_id && sector_id !== 'null' && sector_id !== 'undefined') {
+      query = query.eq("sector_id", sector_id);
+    }
     
     const { data: users } = await query;
     res.json(users || []);
@@ -249,7 +289,7 @@ async function startServer() {
       solicitor_sector_name: (t.solicitor_sector_name as any)?.name,
       executor_sector_name: (t.executor_sector_name as any)?.name,
       status_name: (t.status_name as any)?.name,
-      status_sequence: (t.status_name as any)?.sequence
+      status_sequence: (t.status_sequence as any)?.sequence
     }));
 
     res.json(formattedTickets);
@@ -279,7 +319,7 @@ async function startServer() {
         solicitor_sector_name: (ticket.solicitor_sector_name as any)?.name,
         executor_sector_name: (ticket.executor_sector_name as any)?.name,
         status_name: (ticket.status_name as any)?.name,
-        status_sequence: (ticket.status_name as any)?.sequence
+        status_sequence: (ticket.status_sequence as any)?.sequence
       };
       res.json(formattedTicket);
     } else {
@@ -290,7 +330,12 @@ async function startServer() {
   app.post("/api/tickets", async (req, res) => {
     const { tenant_id, title, description, solicitor_id, executor_id, solicitor_sector_id, executor_sector_id, attachments } = req.body;
     
-    if (solicitor_sector_id === executor_sector_id) {
+    console.log("[CREATE TICKET] Body:", req.body);
+
+    const s_id = Number(solicitor_sector_id);
+    const e_id = executor_sector_id ? Number(executor_sector_id) : null;
+
+    if (e_id && s_id === e_id) {
       return res.status(400).json({ error: "Tickets must be intersectoral." });
     }
 
@@ -306,19 +351,61 @@ async function startServer() {
       return res.status(500).json({ error: "No statuses configured for this tenant." });
     }
 
+    const final_executor_id = executor_id ? Number(executor_id) : null;
+
     const { data: result, error } = await supabase
       .from("tickets")
       .insert({
-        tenant_id, title, description, solicitor_id, executor_id, 
-        solicitor_sector_id, executor_sector_id, status_id: firstStatus.id,
-        last_assigned_at: new Date().toISOString(),
+        tenant_id: Number(tenant_id), 
+        title, 
+        description, 
+        solicitor_id: Number(solicitor_id), 
+        executor_id: final_executor_id, 
+        solicitor_sector_id: s_id, 
+        executor_sector_id: e_id, 
+        status_id: firstStatus.id,
         attachments: attachments || []
       })
       .select()
       .single();
 
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) {
+      console.error("[CREATE TICKET] Supabase Error:", JSON.stringify(error, null, 2));
+      return res.status(400).json({ error: error.message });
+    }
+    if (!result) return res.status(500).json({ error: "Failed to create ticket" });
     res.json({ id: result.id });
+  });
+
+  app.patch("/api/tickets/:id", async (req, res) => {
+    const { id } = req.params;
+    const { user_id, title, description, attachments } = req.body;
+
+    const { data: ticket } = await supabase.from("tickets").select("solicitor_id").eq("id", id).single();
+    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+
+    const is_admin = await isAdmin(user_id);
+    const is_solicitor = ticket.solicitor_id === Number(user_id);
+
+    if (!is_admin && !is_solicitor) {
+      return res.status(403).json({ error: "Acesso negado: Apenas o administrador ou o solicitante podem editar este ticket." });
+    }
+
+    const { error } = await supabase
+      .from("tickets")
+      .update({ title, description, attachments })
+      .eq("id", id);
+
+    if (error) return res.status(400).json({ error: error.message });
+    
+    await supabase.from("comments").insert({
+      ticket_id: id, 
+      user_id, 
+      content: "Ticket editado pelo " + (is_admin ? "administrador" : "solicitante"), 
+      type: "system"
+    });
+
+    res.json({ success: true });
   });
 
   app.get("/api/tickets/:id/comments", async (req, res) => {
@@ -414,31 +501,9 @@ async function startServer() {
       }
     }
 
-    await supabase.from("tickets").update({ status_id }).eq("id", id);
+    await supabase.from("tickets").update({ status_id: Number(status_id) }).eq("id", Number(id));
     await supabase.from("comments").insert({
-      ticket_id: id, user_id, content: `Status alterado para ${targetStatus?.name}`, type: "system"
-    });
-
-    res.json({ success: true });
-  });
-
-  app.patch("/api/tickets/:id/reassign", async (req, res) => {
-    const { id } = req.params;
-    const { executor_id, user_id } = req.body;
-
-    const { data: newExecutor } = await supabase.from("users").select("name").eq("id", executor_id).single();
-
-    await supabase.from("tickets").update({ 
-      executor_id, 
-      last_assigned_at: new Date().toISOString() 
-    }).eq("id", id);
-    
-    await supabase.from("comments").insert({
-      ticket_id: id, user_id, content: `Ticket reatribuído para ${newExecutor?.name}`, type: "system"
-    });
-
-    await supabase.from("notifications").insert({
-      user_id: executor_id, content: `Você recebeu a atribuição do ticket #${id}`
+      ticket_id: Number(id), user_id: Number(user_id), content: `Status alterado para ${targetStatus?.name}`, type: "system"
     });
 
     res.json({ success: true });
@@ -477,26 +542,73 @@ async function startServer() {
 
   // --- Admin Endpoints ---
   const isAdmin = async (user_id: any) => {
-    const { data: user } = await supabase.from("users").select("role").eq("id", user_id).single();
-    return user && user.role === 'admin';
+    if (!user_id || user_id === 'undefined') {
+      console.warn("isAdmin check failed: no user_id provided");
+      return false;
+    }
+    
+    try {
+      // Try to handle both string and number IDs
+      const id = isNaN(Number(user_id)) ? user_id : Number(user_id);
+      
+      // Use .select() instead of .single() to avoid the PGRST116 error if user not found
+      const { data: users, error } = await supabase
+        .from("users")
+        .select("role, email")
+        .eq("id", id);
+        
+      if (error) {
+        console.error(`isAdmin check database error for ID ${id}:`, JSON.stringify(error));
+        return false;
+      }
+      
+      if (!users || users.length === 0) {
+        console.warn(`isAdmin check failed: User with ID ${id} not found in database. This might happen if the session is stale or the database was reset.`);
+        return false;
+      }
+      
+      const user = users[0];
+      const is_admin = user && user.role?.toLowerCase() === 'admin';
+      
+      if (!is_admin) {
+        console.warn(`isAdmin check failed for user ${user?.email} (ID: ${id}): role is ${user?.role}`);
+      }
+      
+      return is_admin;
+    } catch (err) {
+      console.error(`isAdmin check critical error for ID ${user_id}:`, err);
+      return false;
+    }
   };
 
   app.post("/api/admin/sectors", async (req, res) => {
     const { tenant_id, name, admin_id } = req.body;
-    if (!(await isAdmin(admin_id))) return res.status(403).json({ error: "Unauthorized" });
+    if (!(await isAdmin(admin_id))) {
+      return res.status(403).json({ error: "Acesso negado: Você não tem permissão de administrador." });
+    }
     
-    const { data: result, error } = await supabase
-      .from("sectors")
-      .insert({ tenant_id, name })
-      .select()
-      .single();
-    if (error) return res.status(400).json({ error: error.message });
-    res.json(result);
+    try {
+      const { data: result, error } = await supabase
+        .from("sectors")
+        .insert({ tenant_id, name })
+        .select()
+        .single();
+      if (error) {
+        console.error("Supabase insert error (sectors):", error);
+        return res.status(400).json({ error: error.message });
+      }
+      res.json(result);
+    } catch (err) {
+      console.error("API /admin/sectors error:", err);
+      res.status(500).json({ error: "Erro interno do servidor ao criar setor." });
+    }
   });
 
   app.post("/api/admin/users", async (req, res) => {
     const { tenant_id, sector_id, name, email, role, admin_id } = req.body;
-    if (!(await isAdmin(admin_id))) return res.status(403).json({ error: "Unauthorized" });
+    if (!(await isAdmin(admin_id))) {
+      return res.status(403).json({ error: "Acesso negado: Você não tem permissão de administrador." });
+    }
 
     const { data: result, error } = await supabase
       .from("users")
@@ -509,50 +621,147 @@ async function startServer() {
 
   app.get("/api/admin/users", async (req, res) => {
     const { tenant_id, admin_id } = req.query;
-    if (!(await isAdmin(admin_id))) return res.status(403).json({ error: "Unauthorized" });
+    
+    if (!admin_id || admin_id === 'undefined') {
+      return res.status(400).json({ error: "admin_id is required" });
+    }
 
-    const { data: users } = await supabase
-      .from("users")
-      .select("*, sector_name:sectors(name)")
-      .eq("tenant_id", tenant_id);
+    try {
+      if (!(await isAdmin(admin_id))) {
+        return res.status(403).json({ error: "Acesso negado: Você não tem permissão de administrador." });
+      }
+
+      const { data: users, error } = await supabase
+        .from("users")
+        .select("*, sector_name:sectors(name)")
+        .eq("tenant_id", tenant_id);
       
-    const formattedUsers = (users || []).map(u => ({
-      ...u,
-      sector_name: (u.sector_name as any)?.name
-    }));
-    res.json(formattedUsers);
+      if (error) throw error;
+        
+      const formattedUsers = (users || []).map(u => ({
+        ...u,
+        sector_name: (u.sector_name as any)?.name
+      }));
+      res.json(formattedUsers);
+    } catch (err) {
+      console.error("Error in GET /api/admin/users:", err);
+      res.status(500).json({ error: "Erro ao buscar usuários administrativos." });
+    }
   });
 
   app.delete("/api/admin/sectors/:id", async (req, res) => {
     const { id } = req.params;
     const { admin_id } = req.query;
-    if (!(await isAdmin(admin_id))) return res.status(403).json({ error: "Unauthorized" });
-
-    const { count } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("sector_id", id);
-    if (count && count > 0) {
-      return res.status(400).json({ error: "Não é possível excluir um setor que possui usuários vinculados." });
+    
+    console.log(`[DELETE SECTOR] ID: ${id}, Admin: ${admin_id}`);
+    
+    if (!(await isAdmin(admin_id))) {
+      return res.status(403).json({ error: "Acesso negado: Você não tem permissão de administrador." });
     }
 
-    const { error } = await supabase.from("sectors").delete().eq("id", id);
-    if (error) return res.status(400).json({ error: "Erro ao excluir setor." });
-    res.json({ success: true });
+    try {
+      const sectorId = Number(id);
+      if (isNaN(sectorId)) return res.status(400).json({ error: "ID de setor inválido." });
+
+      // Check for users in this sector
+      const { count: userCount, error: userErr } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("sector_id", sectorId);
+      if (userErr) throw userErr;
+      
+      if (userCount && userCount > 0) {
+        return res.status(400).json({ error: "Não é possível excluir um setor que possui usuários vinculados. Remova ou mova os usuários primeiro." });
+      }
+
+      // Check for tickets linked to this sector
+      const { count: ticketCount, error: ticketErr } = await supabase.from("tickets")
+        .select("*", { count: 'exact', head: true })
+        .or(`solicitor_sector_id.eq.${sectorId},executor_sector_id.eq.${sectorId}`);
+      
+      if (ticketErr) throw ticketErr;
+      
+      if (ticketCount && ticketCount > 0) {
+        return res.status(400).json({ error: "Este setor possui histórico de tickets e não pode ser excluído para preservar a integridade dos dados." });
+      }
+
+      const { error } = await supabase.from("sectors").delete().eq("id", sectorId);
+      if (error) {
+        console.error("Supabase delete sector error:", error);
+        return res.status(400).json({ error: "Erro ao excluir setor no banco de dados: " + error.message });
+      }
+      
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Critical error deleting sector:", err);
+      res.status(500).json({ error: "Erro interno ao excluir setor: " + (err.message || "Erro desconhecido") });
+    }
   });
 
   app.delete("/api/admin/users/:id", async (req, res) => {
     const { id } = req.params;
     const { admin_id } = req.query;
-    if (!(await isAdmin(admin_id))) return res.status(403).json({ error: "Unauthorized" });
-
-    if (id === admin_id) return res.status(400).json({ error: "Você não pode excluir a si mesmo." });
-
-    const { data: targetUser } = await supabase.from("users").select("role").eq("id", id).single();
-    if (targetUser?.role === 'admin') {
-      return res.status(400).json({ error: "Não é permitido excluir outros administradores." });
+    
+    console.log(`[DELETE USER] Target ID: ${id}, Admin: ${admin_id}`);
+    
+    if (!(await isAdmin(admin_id))) {
+      return res.status(403).json({ error: "Acesso negado: Você não tem permissão de administrador." });
     }
 
-    const { error } = await supabase.from("users").delete().eq("id", id);
-    if (error) return res.status(400).json({ error: "Erro ao excluir usuário." });
-    res.json({ success: true });
+    if (String(id) === String(admin_id)) {
+      return res.status(400).json({ error: "Você não pode excluir a sua própria conta administrativa." });
+    }
+
+    try {
+      const targetId = Number(id);
+      if (isNaN(targetId)) return res.status(400).json({ error: "ID de usuário inválido." });
+
+      const { data: targetUser, error: targetErr } = await supabase.from("users").select("role").eq("id", targetId).single();
+      if (targetErr && targetErr.code !== 'PGRST116') throw targetErr;
+      
+      if (targetUser?.role === 'admin') {
+        return res.status(400).json({ error: "Não é permitido excluir outros administradores pelo painel." });
+      }
+
+      // Check for tickets linked to this user
+      const { count: ticketCount, error: ticketErr } = await supabase.from("tickets")
+        .select("*", { count: 'exact', head: true })
+        .or(`solicitor_id.eq.${targetId},executor_id.eq.${targetId}`);
+        
+      if (ticketErr) throw ticketErr;
+      
+      if (ticketCount && ticketCount > 0) {
+        return res.status(400).json({ error: "Este colaborador possui tickets vinculados (como solicitante ou executor) e não pode ser excluído." });
+      }
+
+      // Check for comments
+      const { count: commentCount, error: commentErr } = await supabase.from("comments").select("*", { count: 'exact', head: true }).eq("user_id", targetId);
+      if (commentErr) throw commentErr;
+      
+      if (commentCount && commentCount > 0) {
+        return res.status(400).json({ error: "Este colaborador possui comentários registrados em tickets e não pode ser excluído." });
+      }
+
+      // Cleanup notifications before deleting user to avoid FK issues
+      await supabase.from("notifications").delete().eq("user_id", targetId);
+
+      const { error } = await supabase.from("users").delete().eq("id", targetId);
+      if (error) {
+        console.error("Supabase delete user error:", error);
+        return res.status(400).json({ error: "Erro ao excluir usuário no banco de dados: " + error.message });
+      }
+      
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Critical error deleting user:", err);
+      res.status(500).json({ error: "Erro interno ao excluir usuário: " + (err.message || "Erro desconhecido") });
+    }
+  });
+
+  // Global Error Handler - Ensure we always return JSON
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("Global Error Handler:", err);
+    res.status(500).json({ 
+      error: "Internal Server Error", 
+      message: process.env.NODE_ENV === 'production' ? "Ocorreu um erro interno no servidor." : err.message 
+    });
   });
 
   // --- Vite Middleware ---
