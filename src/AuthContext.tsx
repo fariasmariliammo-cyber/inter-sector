@@ -36,7 +36,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem('user', JSON.stringify(userData));
       } else {
         const errorData = await res.json();
-        throw new Error(errorData.error || 'Login failed');
+        const errorMessage = errorData.error || 'Login failed';
+        console.error('Login Error:', errorData);
+        throw new Error(errorMessage);
       }
     } catch (err) {
       if (retries > 0 && err instanceof Error && err.message === 'Failed to fetch') {

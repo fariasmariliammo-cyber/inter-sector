@@ -107,9 +107,14 @@ async function startServer() {
   // Auth
   app.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body;
-    const cleanEmail = (email || "").trim().toLowerCase();
 
-    console.log(`[LOGIN ATTEMPT] Original: "${email}", Clean: "${cleanEmail}", Length: ${cleanEmail.length}`);
+    if (!email || !password) {
+      return res.status(400).json({ error: "E-mail e senha são obrigatórios." });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    console.log(`[LOGIN ATTEMPT] Email: "${cleanEmail}"`);
 
     const authClient = createAuthClient();
 
@@ -120,11 +125,15 @@ async function startServer() {
     });
 
     if (authError) {
-      console.error(`[LOGIN ERROR] Supabase Auth Error for ${email}:`, authError.message);
-      return res.status(401).json({ error: authError.message });
+      console.error(`[LOGIN AUTH ERROR] ${cleanEmail}:`, authError.message);
+      return res.status(401).json({
+        error: "Falha na autenticação: E-mail ou senha incorretos.",
+        detail: authError.message,
+        code: "AUTH_FAILED"
+      });
     }
 
-    console.log(`[LOGIN SUCCESS] Auth successful for ${email}. Fetching profile...`);
+    console.log(`[LOGIN SUCCESS] Supabase Auth OK para ${cleanEmail}. Buscando perfil em public.users...`);
 
     // 2. Fetch profile from public.users
     const { data: user, error: profileError } = await supabase
@@ -138,7 +147,7 @@ async function startServer() {
       .single();
 
     if (profileError) {
-      console.error(`[PROFILE ERROR] Error fetching profile for ${cleanEmail}:`, JSON.stringify(profileError, null, 2));
+      console.error(`[PROFILE DATABASE ERROR] Erro ao buscar perfil para ${cleanEmail}:`, JSON.stringify(profileError, null, 2));
     }
 
     if (user) {
@@ -147,11 +156,14 @@ async function startServer() {
         sector_name: (user.sector_name as any)?.name,
         tenant_name: (user.tenant_name as any)?.name
       };
-      console.log(`[LOGIN COMPLETE] Profile found for ${email}`);
+      console.log(`[LOGIN COMPLETE] Perfil encontrado para ${cleanEmail} (ID: ${user.id})`);
       res.json(formattedUser);
     } else {
-      console.warn(`[LOGIN FAILED] Profile not found in public.users for ${email}`);
-      res.status(401).json({ error: "Perfil de usuário não encontrado no banco de dados." });
+      console.warn(`[LOGIN PROFILE MISSING] Perfil não encontrado na tabela public.users para ${cleanEmail}. O usuário existe no Auth mas não no banco público.`);
+      res.status(401).json({
+        error: "Erro de Perfil: Usuário autenticado, mas seu perfil não foi encontrado. Entre em contato com o suporte.",
+        code: "PROFILE_NOT_FOUND"
+      });
     }
   });
 
