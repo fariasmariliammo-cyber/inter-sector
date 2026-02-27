@@ -1,0 +1,5 @@
+{
+  "name": "InterSector",
+  "description": "SaaS Multi-tenant system for intersectoral ticket management with strict workflow and visibility controls.",
+  "requestFramePermissions": []
+}
