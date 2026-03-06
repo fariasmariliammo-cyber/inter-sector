@@ -1,13 +1,45 @@
 import React, { useState, useEffect } from 'react';
+import { Routes, Route, Navigate, NavLink, Outlet, useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import { Ticket, Sector, User, Status, Comment, Notification } from './types';
 import { 
   Plus, Search, Bell, User as UserIcon, LogOut, 
-  MessageSquare, ChevronRight, Filter, Moon, Sun,
-  CheckCircle2, Clock, AlertCircle, Send, X, Shield, Settings, Mail, Lock, Paperclip, FileText, Download, Edit
+  MessageSquare, ChevronRight, Moon, Sun,
+  CheckCircle2, Clock, AlertCircle, Send, X, Shield, Settings, Mail, Lock, Paperclip, FileText, Download, Edit,
+  BarChart3, LayoutGrid, Menu
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AdminPanel } from './components/AdminPanel';
+import { apiFetch } from './lib/apiFetch';
+import { ToastProvider, useToast } from './components/Toast';
+
+const TICKETS_PAGE_SIZE = 50;
+const COMMENTS_PAGE_SIZE = 100;
+const METRICS_TICKETS_LIMIT = 200;
+
+type AppShellContext = {
+  notifications: Notification[];
+  markAsRead: (id: number) => Promise<void>;
+};
+
+const fetchWithRetry = async (url: string, options?: RequestInit, retries = 3): Promise<any> => {
+  try {
+    const res = await apiFetch(url, options);
+    if (res.status === 429) {
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      if (retries > 0) return fetchWithRetry(url, options, retries - 1);
+      throw new Error('Too many requests. Please try again later.');
+    }
+    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    if (retries > 0 && !(err instanceof Error && err.message.includes('429'))) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return fetchWithRetry(url, options, retries - 1);
+    }
+    throw err;
+  }
+};
 
 function Login() {
   const [email, setEmail] = useState('');
@@ -15,6 +47,7 @@ function Login() {
   const [name, setName] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
   const { login, signup } = useAuth();
+  const toast = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,7 +58,7 @@ function Login() {
         await login(email, password);
       }
     } catch (err: any) {
-      alert(err.message || 'Ocorreu um erro. Tente novamente.');
+      toast.error(err.message || 'Ocorreu um erro. Tente novamente.');
     }
   };
 
@@ -47,7 +80,7 @@ function Login() {
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 text-primary mb-6">
               <Shield size={32} />
             </div>
-            <h1 className="text-4xl font-black tracking-tighter mb-2">InterSector</h1>
+            <h1 className="text-4xl font-black tracking-tighter mb-2">Gestão 360</h1>
             <p className="text-muted-foreground font-medium">
               {isRegistering ? 'Crie sua conta e organização' : 'Bem-vindo de volta'}
             </p>
@@ -63,10 +96,12 @@ function Login() {
                   <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
                   <input
                     type="text"
+                    name="name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="w-full p-4 pl-12 rounded-2xl border bg-background focus:ring-2 focus:ring-primary outline-none transition-all font-medium"
                     placeholder="Seu nome completo"
+                    autoComplete="name"
                     required={isRegistering}
                   />
                 </div>
@@ -81,10 +116,12 @@ function Login() {
                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
                 <input
                   type="email"
+                  name="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full p-4 pl-12 rounded-2xl border bg-background focus:ring-2 focus:ring-primary outline-none transition-all font-medium"
                   placeholder="seu@email.com"
+                  autoComplete="email"
                   required
                 />
               </div>
@@ -98,10 +135,12 @@ function Login() {
                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
                 <input
                   type="password"
+                  name="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full p-4 pl-12 rounded-2xl border bg-background focus:ring-2 focus:ring-primary outline-none transition-all font-medium"
                   placeholder="••••••••"
+                  autoComplete={isRegistering ? 'new-password' : 'current-password'}
                   required
                   minLength={6}
                 />
@@ -132,6 +171,7 @@ function Login() {
 
 function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: () => void }) {
   const { user } = useAuth();
+  const toast = useToast();
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [formData, setFormData] = useState({
@@ -152,7 +192,7 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
     body.append('file', file);
 
     try {
-      const res = await fetch('/api/upload', {
+      const res = await apiFetch('/api/upload', {
         method: 'POST',
         body
       });
@@ -162,18 +202,19 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
       }
     } catch (err) {
       console.error("Upload failed:", err);
+      toast.error('Falha ao enviar arquivo.');
     } finally {
       setUploading(false);
     }
   };
 
   useEffect(() => {
-    fetch(`/api/sectors?tenant_id=${user?.tenant_id}`).then(res => res.json()).then(setSectors);
+    apiFetch(`/api/sectors?tenant_id=${user?.tenant_id}`).then(res => res.json()).then(setSectors);
   }, [user]);
 
   useEffect(() => {
     if (formData.executor_sector_id) {
-      fetch(`/api/users?tenant_id=${user?.tenant_id}&sector_id=${formData.executor_sector_id}`)
+      apiFetch(`/api/users?tenant_id=${user?.tenant_id}&sector_id=${formData.executor_sector_id}`)
         .then(res => res.json())
         .then(setUsers);
     }
@@ -182,11 +223,11 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user?.tenant_id || !user?.id || !user?.sector_id) {
-      alert("Erro: Dados do usuário não carregados completamente.");
+      toast.warning('Dados do usuario nao carregados completamente.');
       return;
     }
 
-    const res = await fetch('/api/tickets', {
+    const res = await apiFetch('/api/tickets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -201,12 +242,13 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
       }),
     });
     if (res.ok) {
+      toast.success('Ticket criado com sucesso.');
       onCreated();
       onClose();
     } else {
       const data = await res.json();
       console.error("Ticket creation failed:", data);
-      alert(`Erro ao criar ticket: ${data.error || 'Erro desconhecido'}`);
+      toast.error(`Erro ao criar ticket: ${data.error || 'Erro desconhecido'}`);
     }
   };
 
@@ -304,8 +346,11 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
 
 function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => void }) {
   const { user } = useAuth();
+  const toast = useToast();
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [commentsHasMore, setCommentsHasMore] = useState(false);
+  const [commentsLoadingMore, setCommentsLoadingMore] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [commentAttachments, setCommentAttachments] = useState<string[]>([]);
   const [uploadingComment, setUploadingComment] = useState(false);
@@ -319,25 +364,47 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
   const [editAttachments, setEditAttachments] = useState<string[]>([]);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-  const fetchTicket = () => {
-    fetch(`/api/tickets/${ticketId}`).then(res => res.json()).then(data => {
-      setTicket(data);
-      setEditTitle(data.title);
-      setEditDescription(data.description);
-      setEditAttachments(data.attachments || []);
+  const fetchTicket = async () => {
+    const res = await apiFetch(`/api/tickets/${ticketId}`);
+    const data = await res.json();
+    setTicket(data);
+    setEditTitle(data.title);
+    setEditDescription(data.description);
+    setEditAttachments(data.attachments || []);
+  };
+
+  const fetchComments = async (options?: { append?: boolean }) => {
+    const offset = options?.append ? comments.length : 0;
+    const limit = COMMENTS_PAGE_SIZE + 1;
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+      order: 'desc'
     });
-    fetch(`/api/tickets/${ticketId}/comments?user_id=${user?.id}`).then(res => res.json()).then(setComments);
+
+    try {
+      if (options?.append) setCommentsLoadingMore(true);
+      const res = await apiFetch(`/api/tickets/${ticketId}/comments?${params}`);
+      const data = await res.json();
+      const hasMore = data.length > COMMENTS_PAGE_SIZE;
+      const page = (hasMore ? data.slice(0, COMMENTS_PAGE_SIZE) : data).reverse();
+      setComments(prev => (options?.append ? [...page, ...prev] : page));
+      setCommentsHasMore(hasMore);
+    } finally {
+      if (options?.append) setCommentsLoadingMore(false);
+    }
   };
 
   useEffect(() => {
     fetchTicket();
-    fetch(`/api/statuses?tenant_id=${user?.tenant_id}`).then(res => res.json()).then(setStatuses);
+    fetchComments();
+    apiFetch(`/api/statuses?tenant_id=${user?.tenant_id}`).then(res => res.json()).then(setStatuses);
   }, [ticketId, user]);
 
   const handleComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newComment.trim() && commentAttachments.length === 0) return;
-    const res = await fetch(`/api/tickets/${ticketId}/comments`, {
+    const res = await apiFetch(`/api/tickets/${ticketId}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
@@ -350,6 +417,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
       setNewComment('');
       setCommentAttachments([]);
       fetchTicket();
+      fetchComments();
     }
   };
 
@@ -362,7 +430,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
     body.append('file', file);
 
     try {
-      const res = await fetch('/api/upload', {
+      const res = await apiFetch('/api/upload', {
         method: 'POST',
         body
       });
@@ -372,6 +440,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
       }
     } catch (err) {
       console.error("Upload failed:", err);
+      toast.error('Falha ao enviar arquivo.');
     } finally {
       setUploadingComment(false);
     }
@@ -382,15 +451,18 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
     const nextStatus = statuses.find(s => s.sequence === ticket.status_sequence + 1);
     if (!nextStatus) return;
 
-    const res = await fetch(`/api/tickets/${ticketId}/status`, {
+    const res = await apiFetch(`/api/tickets/${ticketId}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status_id: nextStatus.id, user_id: user?.id, role: user?.role }),
     });
-    if (res.ok) fetchTicket();
+    if (res.ok) {
+      toast.success('Status atualizado com sucesso.');
+      fetchTicket();
+    }
     else {
       const data = await res.json();
-      alert(data.error);
+      toast.error(data.error || 'Falha ao atualizar status.');
     }
   };
 
@@ -405,7 +477,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
     if (!editTitle.trim() || !editDescription.trim()) return;
     setIsSavingEdit(true);
     try {
-      const res = await fetch(`/api/tickets/${ticketId}`, {
+      const res = await apiFetch(`/api/tickets/${ticketId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -416,14 +488,16 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
         }),
       });
       if (res.ok) {
+        toast.success('Ticket atualizado com sucesso.');
         setIsEditing(false);
         fetchTicket();
       } else {
         const data = await res.json();
-        alert(data.error);
+        toast.error(data.error || 'Falha ao atualizar ticket.');
       }
     } catch (err) {
       console.error(err);
+      toast.error('Falha ao atualizar ticket.');
     } finally {
       setIsSavingEdit(false);
     }
@@ -437,11 +511,12 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
     body.append('file', file);
 
     try {
-      const res = await fetch('/api/upload', { method: 'POST', body });
+      const res = await apiFetch('/api/upload', { method: 'POST', body });
       const data = await res.json();
       if (data.url) setEditAttachments(prev => [...prev, data.url]);
     } catch (err) {
       console.error(err);
+      toast.error('Falha ao enviar arquivo.');
     }
   };
 
@@ -449,7 +524,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
     const val = e.target.value;
     setNewComment(val);
     if (val.endsWith('@')) {
-      fetch(`/api/users?tenant_id=${user?.tenant_id}&sector_id=${ticket?.executor_sector_id}`)
+      apiFetch(`/api/users?tenant_id=${user?.tenant_id}&sector_id=${ticket?.executor_sector_id}`)
         .then(res => res.json())
         .then(setMentionUsers);
       setShowMentions(true);
@@ -591,6 +666,16 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
 
           <div className="space-y-4">
             <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Histórico e Comentários</h3>
+            {commentsHasMore && (
+              <button
+                type="button"
+                onClick={() => fetchComments({ append: true })}
+                disabled={commentsLoadingMore}
+                className="w-full py-2 text-xs font-bold uppercase tracking-widest rounded-xl border bg-muted/30 hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {commentsLoadingMore ? 'Carregando...' : 'Carregar comentários anteriores'}
+              </button>
+            )}
             {comments.map(c => (
               <div key={c.id} className={`flex flex-col ${c.type === 'system' ? 'items-center' : 'items-start'}`}>
                 {c.type === 'system' ? (
@@ -706,6 +791,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
 
 function TenantNameModal({ tenantId, currentName, onUpdated }: { tenantId: number, currentName: string, onUpdated: (newName: string) => void }) {
   const { user } = useAuth();
+  const toast = useToast();
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -714,16 +800,21 @@ function TenantNameModal({ tenantId, currentName, onUpdated }: { tenantId: numbe
     if (!name.trim() || name === currentName) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/tenants/${tenantId}`, {
+      const res = await apiFetch(`/api/tenants/${tenantId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, admin_id: user?.id }),
       });
       if (res.ok) {
+        toast.success('Nome da empresa atualizado com sucesso.');
         onUpdated(name);
+      } else {
+        const data = await res.json();
+        toast.error(data.error || 'Falha ao atualizar nome da empresa.');
       }
     } catch (err) {
       console.error(err);
+      toast.error('Falha ao atualizar nome da empresa.');
     } finally {
       setLoading(false);
     }
@@ -777,17 +868,16 @@ function TenantNameModal({ tenantId, currentName, onUpdated }: { tenantId: numbe
   );
 }
 
-function Dashboard() {
-  const { user, logout } = useAuth();
+function TicketsPage() {
+  const { user } = useAuth();
+  const { notifications, markAsRead } = useOutletContext<AppShellContext>();
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [ticketsHasMore, setTicketsHasMore] = useState(false);
+  const [ticketsLoadingMore, setTicketsLoadingMore] = useState(false);
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [statuses, setStatuses] = useState<Status[]>([]);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNewTicket, setShowNewTicket] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
-  const [theme, setTheme] = useState<'light' | 'dark'>(user?.theme || 'light');
-  const [view, setView] = useState<'tickets' | 'admin'>('tickets');
-  const [showTenantModal, setShowTenantModal] = useState(false);
   
   const [filters, setFilters] = useState({
     sector_solicitor: '',
@@ -796,61 +886,28 @@ function Dashboard() {
     search: ''
   });
 
-  useEffect(() => {
-    if (user && user.role === 'admin' && user.tenant_name?.startsWith('Empresa de ')) {
-      setShowTenantModal(true);
-    }
-  }, [user]);
-
-  const handleTenantUpdated = (newName: string) => {
-    if (user) {
-      const updatedUser = { ...user, tenant_name: newName };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      window.location.reload(); // Reload to refresh all context with new name
-    }
-  };
-
-  const fetchWithRetry = async (url: string, options?: RequestInit, retries = 3): Promise<any> => {
-    try {
-      const res = await fetch(url, options);
-      if (res.status === 429) {
-        console.warn("Rate limited (429). Waiting before retry...");
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        if (retries > 0) return fetchWithRetry(url, options, retries - 1);
-        throw new Error("Too many requests. Please try again later.");
-      }
-      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-      return await res.json();
-    } catch (err) {
-      if (retries > 0 && !(err instanceof Error && err.message.includes("429"))) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        return fetchWithRetry(url, options, retries - 1);
-      }
-      throw err;
-    }
-  };
-
-  const fetchTickets = async () => {
+  const fetchTickets = async (options?: { append?: boolean }) => {
+    const offset = options?.append ? tickets.length : 0;
+    const limit = TICKETS_PAGE_SIZE + 1;
     const params = new URLSearchParams({
       tenant_id: user?.tenant_id.toString() || '',
       user_id: user?.id.toString() || '',
       role: user?.role || '',
+      limit: String(limit),
+      offset: String(offset),
       ...filters
     });
     try {
+      if (options?.append) setTicketsLoadingMore(true);
       const data = await fetchWithRetry(`/api/tickets?${params}`);
-      setTickets(data);
+      const hasMore = data.length > TICKETS_PAGE_SIZE;
+      const page = hasMore ? data.slice(0, TICKETS_PAGE_SIZE) : data;
+      setTickets(prev => (options?.append ? [...prev, ...page] : page));
+      setTicketsHasMore(hasMore);
     } catch (err) {
       console.error("Failed to fetch tickets:", err);
-    }
-  };
-
-  const fetchNotifications = async () => {
-    try {
-      const data = await fetchWithRetry(`/api/notifications/${user?.id}`);
-      setNotifications(data);
-    } catch (err) {
-      console.error("Failed to fetch notifications:", err);
+    } finally {
+      if (options?.append) setTicketsLoadingMore(false);
     }
   };
 
@@ -859,133 +916,62 @@ function Dashboard() {
       fetchTickets();
       fetchWithRetry(`/api/sectors?tenant_id=${user?.tenant_id}`).then(setSectors).catch(console.error);
       fetchWithRetry(`/api/statuses?tenant_id=${user?.tenant_id}`).then(setStatuses).catch(console.error);
-      fetchNotifications();
+    } else {
+      setTickets([]);
+      setTicketsHasMore(false);
     }
-    const interval = setInterval(() => {
-      if (user) fetchNotifications();
-    }, 10000);
-    return () => clearInterval(interval);
   }, [user, filters]);
 
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-  }, [theme]);
-
-  const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
-
-  const markAsRead = async (id: number) => {
-    await fetch(`/api/notifications/${id}/read`, { method: 'POST' });
-    fetchNotifications();
-  };
-
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
-      {showTenantModal && user && (
-        <TenantNameModal 
-          tenantId={user.tenant_id} 
-          currentName={user.tenant_name || ''} 
-          onUpdated={handleTenantUpdated} 
-        />
-      )}
-      {/* Header */}
-      <header className="sticky top-0 z-40 w-full border-b bg-background/80 backdrop-blur-md">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold tracking-tighter">InterSector</h1>
-            <div className="hidden md:flex items-center gap-4">
-              <select 
-                className="bg-muted/50 border-none rounded-lg text-xs p-2 outline-none"
-                value={filters.sector_solicitor}
-                onChange={e => setFilters({...filters, sector_solicitor: e.target.value})}
-              >
-                <option value="">Setor Solicitante</option>
-                {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-              <select 
-                className="bg-muted/50 border-none rounded-lg text-xs p-2 outline-none"
-                value={filters.sector_executor}
-                onChange={e => setFilters({...filters, sector_executor: e.target.value})}
-              >
-                <option value="">Setor Executor</option>
-                {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-              <select 
-                className="bg-muted/50 border-none rounded-lg text-xs p-2 outline-none"
-                value={filters.status_id}
-                onChange={e => setFilters({...filters, status_id: e.target.value})}
-              >
-                <option value="">Status</option>
-                {statuses.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            {user?.role === 'admin' && (
-              <button 
-                onClick={() => setView(view === 'tickets' ? 'admin' : 'tickets')}
-                className={`p-2 rounded-full transition-colors ${view === 'admin' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
-                title="Painel Administrativo"
-              >
-                <Settings size={20}/>
-              </button>
-            )}
-            <button onClick={toggleTheme} className="p-2 hover:bg-muted rounded-full transition-colors">
-              {theme === 'light' ? <Moon size={20}/> : <Sun size={20}/>}
-            </button>
-            
-            <div className="relative group">
-              <button className="p-2 hover:bg-muted rounded-full transition-colors relative">
-                <Bell size={20}/>
-                {notifications.length > 0 && <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full"/>}
-              </button>
-              <div className="absolute right-0 top-full mt-2 w-80 bg-card border rounded-2xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
-                <div className="p-4 border-b bg-muted/30 font-bold text-sm">Notificações</div>
-                <div className="max-h-96 overflow-y-auto">
-                  {notifications.length === 0 ? (
-                    <div className="p-8 text-center text-sm text-muted-foreground">Nenhuma notificação nova</div>
-                  ) : (
-                    notifications.map(n => (
-                      <div key={n.id} className="p-4 border-b hover:bg-muted/50 transition-colors flex justify-between items-start gap-2">
-                        <p className="text-xs">{n.content}</p>
-                        <button onClick={() => markAsRead(n.id)} className="text-[10px] font-bold text-primary hover:underline">Lido</button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 pl-4 border-l">
-              <div className="text-right hidden sm:block">
-                <p className="text-sm font-bold leading-none">{user?.name}</p>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{user?.sector_name}</p>
-              </div>
-              <button onClick={logout} className="p-2 hover:bg-destructive/10 hover:text-destructive rounded-full transition-colors">
-                <LogOut size={20}/>
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="flex-1 container mx-auto px-4 py-8">
-        {view === 'admin' ? (
-          <AdminPanel />
-        ) : (
-          <>
-            <div className="flex justify-between items-center mb-8">
+    <div className="relative">
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-3xl font-bold tracking-tight">Tickets</h2>
             <p className="text-muted-foreground">Gerencie as demandas intersetoriais da {user?.tenant_name}</p>
           </div>
           <button 
             onClick={() => setShowNewTicket(true)}
-            className="bg-primary text-primary-foreground px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:opacity-90 transition-opacity shadow-lg"
+            className="bg-primary text-primary-foreground px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:opacity-90 transition-opacity shadow-lg w-full md:w-auto"
           >
             <Plus size={20}/> Novo Ticket
           </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-card/50 border rounded-2xl p-4">
+          <select 
+            className="bg-muted/40 border-none rounded-lg text-sm p-3 outline-none"
+            value={filters.sector_solicitor}
+            onChange={e => setFilters({...filters, sector_solicitor: e.target.value})}
+          >
+            <option value="">Setor Solicitante</option>
+            {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <select 
+            className="bg-muted/40 border-none rounded-lg text-sm p-3 outline-none"
+            value={filters.sector_executor}
+            onChange={e => setFilters({...filters, sector_executor: e.target.value})}
+          >
+            <option value="">Setor Executor</option>
+            {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <select 
+            className="bg-muted/40 border-none rounded-lg text-sm p-3 outline-none"
+            value={filters.status_id}
+            onChange={e => setFilters({...filters, status_id: e.target.value})}
+          >
+            <option value="">Status</option>
+            {statuses.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={filters.search}
+              onChange={e => setFilters({...filters, search: e.target.value})}
+              placeholder="Buscar por título ou #"
+              className="w-full bg-muted/40 border-none rounded-lg text-sm py-3 pl-9 pr-3 outline-none"
+            />
+          </div>
         </div>
 
         {/* Persistent Notifications Popups */}
@@ -1054,15 +1040,25 @@ function Dashboard() {
           ))}
         </div>
 
+        {tickets.length > 0 && ticketsHasMore && (
+          <div className="mt-2 flex justify-center">
+            <button
+              onClick={() => fetchTickets({ append: true })}
+              disabled={ticketsLoadingMore}
+              className="px-6 py-3 text-xs font-bold uppercase tracking-widest rounded-xl border bg-muted/30 hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              {ticketsLoadingMore ? 'Carregando...' : 'Carregar mais tickets'}
+            </button>
+          </div>
+        )}
+
         {tickets.length === 0 && (
           <div className="text-center py-20 bg-muted/20 rounded-3xl border-2 border-dashed">
             <Search size={48} className="mx-auto mb-4 opacity-20"/>
             <p className="text-muted-foreground font-medium">Nenhum ticket encontrado com os filtros atuais.</p>
           </div>
         )}
-          </>
-        )}
-      </main>
+      </div>
 
       {/* Modals */}
       <AnimatePresence>
@@ -1073,23 +1069,442 @@ function Dashboard() {
   );
 }
 
+function MetricCard({ title, value, subtitle, icon }: { title: string; value: string | number; subtitle?: string; icon: React.ReactNode }) {
+  return (
+    <div className="bg-card border rounded-2xl p-5 shadow-sm">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
+        <div className="text-primary">{icon}</div>
+      </div>
+      <div className="mt-4 text-3xl font-black tracking-tight">{value}</div>
+      {subtitle && <p className="text-xs text-muted-foreground mt-2">{subtitle}</p>}
+    </div>
+  );
+}
+
+function DashboardPage() {
+  const { user } = useAuth();
+  const { notifications } = useOutletContext<AppShellContext>();
+  const navigate = useNavigate();
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [statuses, setStatuses] = useState<Status[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadDashboard = async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams({
+      tenant_id: user.tenant_id.toString(),
+      user_id: user.id.toString(),
+      role: user.role,
+      limit: String(METRICS_TICKETS_LIMIT),
+      offset: '0'
+    });
+    try {
+      const [ticketsData, statusData] = await Promise.all([
+        fetchWithRetry(`/api/tickets?${params}`),
+        fetchWithRetry(`/api/statuses?tenant_id=${user.tenant_id}`)
+      ]);
+      setTickets(ticketsData || []);
+      setStatuses(statusData || []);
+    } catch (err) {
+      console.error('Failed to load dashboard data:', err);
+      setError('Não foi possível carregar o dashboard.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDashboard();
+  }, [user]);
+
+  const total = tickets.length;
+  const countsByStatusId = tickets.reduce<Record<number, number>>((acc, t) => {
+    acc[t.status_id] = (acc[t.status_id] || 0) + 1;
+    return acc;
+  }, {});
+  const openCount = tickets.filter(t => t.status_sequence === 1).length;
+  const inProgressCount = tickets.filter(t => t.status_sequence === 2).length;
+  const inReviewCount = tickets.filter(t => t.status_sequence === 3).length;
+  const doneCount = tickets.filter(t => t.status_sequence === 4).length;
+  const withoutExecutor = tickets.filter(t => !t.executor_sector_id).length;
+  const myQueue = tickets.filter(t => t.executor_id === user?.id && t.status_sequence < 4).length;
+
+  const statusBreakdown = [...statuses]
+    .sort((a, b) => a.sequence - b.sequence)
+    .map(s => ({
+      ...s,
+      count: countsByStatusId[s.id] || 0,
+      percent: total ? Math.round(((countsByStatusId[s.id] || 0) / total) * 100) : 0
+    }));
+
+  const recentTickets = [...tickets]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 6);
+
+  const recentNotifications = [...notifications]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 6);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <motion.div 
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+          className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full"
+        />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-card border rounded-2xl p-6 flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">{error}</p>
+        <button onClick={loadDashboard} className="px-4 py-2 text-xs font-bold uppercase tracking-widest rounded-lg border hover:bg-muted">
+          Tentar novamente
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
+        <p className="text-muted-foreground">Visão geral das operações de tickets da {user?.tenant_name}</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <MetricCard title="Total de tickets" value={total} subtitle={`Últimos ${Math.min(total, METRICS_TICKETS_LIMIT)} carregados`} icon={<LayoutGrid size={18} />} />
+        <MetricCard title="Em aberto" value={openCount} subtitle="Aguardando início" icon={<Clock size={18} />} />
+        <MetricCard title="Em andamento" value={inProgressCount} subtitle="Em atendimento" icon={<AlertCircle size={18} />} />
+        <MetricCard title="Concluídos" value={doneCount} subtitle="Finalizados" icon={<CheckCircle2 size={18} />} />
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="bg-card border rounded-2xl p-5 xl:col-span-2">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold">Distribuição por status</h3>
+            <button onClick={() => navigate('/tickets')} className="text-xs font-bold text-primary hover:underline">
+              Ver tickets
+            </button>
+          </div>
+          <div className="space-y-3">
+            {statusBreakdown.map(s => (
+              <div key={s.id} className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold">{s.name}</span>
+                  <span className="text-muted-foreground">{s.count} ({s.percent}%)</span>
+                </div>
+                <div className="h-2 rounded-full bg-muted/50 overflow-hidden">
+                  <div className="h-full bg-primary" style={{ width: `${s.percent}%` }} />
+                </div>
+              </div>
+            ))}
+            {statusBreakdown.length === 0 && (
+              <div className="text-sm text-muted-foreground">Nenhum status configurado.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-card border rounded-2xl p-5">
+          <h3 className="text-lg font-bold mb-4">Fila pessoal</h3>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">Tickets comigo</p>
+              <p className="text-xl font-black">{myQueue}</p>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">Sem executor</p>
+              <p className="text-xl font-black">{withoutExecutor}</p>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">Em revisão</p>
+              <p className="text-xl font-black">{inReviewCount}</p>
+            </div>
+            <button onClick={() => navigate('/tickets')} className="w-full py-3 text-xs font-bold uppercase tracking-widest rounded-xl border hover:bg-muted">
+              Ir para tickets
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="bg-card border rounded-2xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold">Tickets recentes</h3>
+            <button onClick={() => navigate('/tickets')} className="text-xs font-bold text-primary hover:underline">
+              Abrir lista
+            </button>
+          </div>
+          <div className="space-y-3">
+            {recentTickets.map(t => (
+              <div key={t.id} className="flex items-center justify-between gap-3 p-3 rounded-xl hover:bg-muted/40 transition-colors">
+                <div>
+                  <p className="text-sm font-semibold line-clamp-1">{t.title}</p>
+                  <p className="text-[11px] text-muted-foreground">#{t.id} • {t.solicitor_sector_name} → {t.executor_sector_name || 'Não atribuído'}</p>
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-primary/10 text-primary">
+                  {t.status_name}
+                </span>
+              </div>
+            ))}
+            {recentTickets.length === 0 && (
+              <div className="text-sm text-muted-foreground">Nenhum ticket recente.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-card border rounded-2xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold">Notificações recentes</h3>
+            <button onClick={() => navigate('/tickets')} className="text-xs font-bold text-primary hover:underline">
+              Ver detalhes
+            </button>
+          </div>
+          <div className="space-y-3">
+            {recentNotifications.map(n => (
+              <div key={n.id} className="p-3 rounded-xl border bg-muted/20 text-xs">
+                <p className="font-medium">{n.content}</p>
+                <p className="text-[10px] text-muted-foreground mt-1">{new Date(n.created_at).toLocaleString()}</p>
+              </div>
+            ))}
+            {recentNotifications.length === 0 && (
+              <div className="text-sm text-muted-foreground">Nenhuma notificação recente.</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminPage() {
+  return (
+    <div className="flex flex-col gap-6">
+      <div>
+        <h2 className="text-3xl font-bold tracking-tight">Administração</h2>
+        <p className="text-muted-foreground">Gerencie setores e usuários do tenant.</p>
+      </div>
+      <AdminPanel />
+    </div>
+  );
+}
+
+function AppShell() {
+  const { user, logout } = useAuth();
+  const location = useLocation();
+  const [theme, setTheme] = useState<'light' | 'dark'>(user?.theme || 'light');
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showTenantModal, setShowTenantModal] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    if (user && user.role === 'admin' && user.tenant_name?.startsWith('Empresa de ')) {
+      setShowTenantModal(true);
+    }
+  }, [user]);
+
+  const handleTenantUpdated = (newName: string) => {
+    if (user) {
+      const updatedUser = { ...user, tenant_name: newName };
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      window.location.reload();
+    }
+  };
+
+  const fetchNotifications = async () => {
+    if (!user) return;
+    try {
+      const data = await fetchWithRetry(`/api/notifications/${user.id}`);
+      setNotifications(data || []);
+    } catch (err) {
+      console.error('Failed to fetch notifications:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchNotifications();
+    } else {
+      setNotifications([]);
+    }
+    const interval = setInterval(() => {
+      if (user) fetchNotifications();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [user]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
+
+  const markAsRead = async (id: number) => {
+    await apiFetch(`/api/notifications/${id}/read`, { method: 'POST' });
+    fetchNotifications();
+  };
+
+  const unreadCount = notifications.filter(n => !n.is_read).length;
+  const sortedNotifications = [...notifications].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+
+  const pageTitle = location.pathname.startsWith('/tickets')
+    ? 'Tickets'
+    : location.pathname.startsWith('/admin')
+    ? 'Administração'
+      : 'Dashboard';
+
+  const navLinkClass = ({ isActive }: { isActive: boolean }) =>
+    `flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
+      isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+    }`;
+
+  return (
+    <div className="h-screen bg-background text-foreground flex overflow-hidden">
+      {showTenantModal && user && (
+        <TenantNameModal 
+          tenantId={user.tenant_id} 
+          currentName={user.tenant_name || ''} 
+          onUpdated={handleTenantUpdated} 
+        />
+      )}
+
+      <div
+        className={`fixed inset-0 bg-black/40 z-40 transition-opacity md:hidden ${sidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        onClick={() => setSidebarOpen(false)}
+      />
+
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 h-screen bg-card border-r p-6 flex flex-col gap-8 transition-transform md:static md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Gestão 360</p>
+            <p className="text-lg font-black tracking-tight">{user?.tenant_name || 'Seu Tenant'}</p>
+          </div>
+          <button className="md:hidden p-2 hover:bg-muted rounded-full" onClick={() => setSidebarOpen(false)}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <nav className="flex flex-col gap-2">
+          <NavLink to="/" end className={navLinkClass} onClick={() => setSidebarOpen(false)}>
+            <BarChart3 size={18} />
+            Dashboard
+          </NavLink>
+          <NavLink to="/tickets" className={navLinkClass} onClick={() => setSidebarOpen(false)}>
+            <LayoutGrid size={18} />
+            Tickets
+          </NavLink>
+          {user?.role === 'admin' && (
+            <NavLink to="/admin" className={navLinkClass} onClick={() => setSidebarOpen(false)}>
+              <Shield size={18} />
+              Administração
+            </NavLink>
+          )}
+        </nav>
+
+        <div className="mt-auto space-y-3">
+          <button onClick={toggleTheme} className="w-full flex items-center justify-between px-3 py-2 rounded-xl border bg-muted/30 hover:bg-muted transition-colors text-sm font-semibold">
+            <span>Tema</span>
+            {theme === 'light' ? <Sun size={18}/> : <Moon size={18}/>}
+          </button>
+          <button onClick={logout} className="w-full flex items-center justify-between px-3 py-2 rounded-xl border hover:bg-destructive/10 hover:text-destructive transition-colors text-sm font-semibold">
+            <span>Sair</span>
+            <LogOut size={18} />
+          </button>
+        </div>
+      </aside>
+
+      <div className="flex-1 flex flex-col h-screen">
+        <header className="sticky top-0 z-30 w-full border-b bg-background/80 backdrop-blur-md">
+          <div className="px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button className="md:hidden p-2 hover:bg-muted rounded-full" onClick={() => setSidebarOpen(true)}>
+                <Menu size={20} />
+              </button>
+              <div>
+                <p className="text-lg font-bold tracking-tight">{pageTitle}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <div className="relative group">
+                <button className="p-2 hover:bg-muted rounded-full transition-colors relative">
+                  <Bell size={20}/>
+                  {unreadCount > 0 && <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full"/>}
+                </button>
+                <div className="absolute right-0 top-full mt-2 w-80 bg-card border rounded-2xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
+                  <div className="p-4 border-b bg-muted/30 font-bold text-sm">Notificações</div>
+                  <div className="max-h-96 overflow-y-auto">
+                    {sortedNotifications.length === 0 ? (
+                      <div className="p-8 text-center text-sm text-muted-foreground">Nenhuma notificação nova</div>
+                    ) : (
+                      sortedNotifications.map(n => (
+                        <div key={n.id} className="p-4 border-b hover:bg-muted/50 transition-colors flex justify-between items-start gap-2">
+                          <p className="text-xs">{n.content}</p>
+                          <button onClick={() => markAsRead(n.id)} className="text-[10px] font-bold text-primary hover:underline">Lido</button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="hidden md:flex items-center gap-3 pl-4 border-l">
+                <div className="text-right">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{user?.sector_name}</p>
+                </div>
+                <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center font-bold">{user?.name?.[0]}</div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 px-6 py-6 lg:px-8 overflow-y-auto">
+          <Outlet context={{ notifications, markAsRead }} />
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function AuthenticatedApp() {
+  const { user } = useAuth();
+
+  return (
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route index element={<DashboardPage />} />
+        <Route path="tickets" element={<TicketsPage />} />
+        <Route
+          path="admin"
+          element={user?.role === 'admin' ? <AdminPage /> : <Navigate to="/" replace />}
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  );
+}
+
 export default function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <ToastProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </ToastProvider>
   );
 }
 
 function AppContent() {
   const { user, loading } = useAuth();
-
-  useEffect(() => {
-    fetch('/api/health')
-      .then(res => res.json())
-      .then(data => console.log('Server health:', data))
-      .catch(err => console.error('Server health check failed:', err));
-  }, []);
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-background">
@@ -1101,5 +1516,5 @@ function AppContent() {
     </div>
   );
 
-  return user ? <Dashboard /> : <Login />;
+  return user ? <AuthenticatedApp /> : <Login />;
 }

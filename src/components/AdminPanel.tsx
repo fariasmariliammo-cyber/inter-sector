@@ -7,6 +7,7 @@ import {
   ChevronRight, Building2, UserCircle2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { apiFetch } from '../lib/apiFetch';
 
 function StatusMessage({ message, type }: { message: string, type: 'success' | 'error' }) {
   return (
@@ -51,8 +52,8 @@ export function AdminPanel() {
     
     try {
       const [sRes, uRes] = await Promise.all([
-        fetch(`/api/sectors?tenant_id=${user.tenant_id}`),
-        fetch(`/api/admin/users?tenant_id=${user.tenant_id}&admin_id=${user.id}`)
+        apiFetch(`/api/sectors?tenant_id=${user.tenant_id}`),
+        apiFetch(`/api/admin/users?tenant_id=${user.tenant_id}&admin_id=${user.id}`)
       ]);
 
       let sData, uData;
@@ -97,7 +98,7 @@ export function AdminPanel() {
     e.preventDefault();
     setIsSubmittingSector(true);
     try {
-      const res = await fetch('/api/admin/sectors', {
+      const res = await apiFetch('/api/admin/sectors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tenant_id: user?.tenant_id, name: newSectorName, admin_id: user?.id }),
@@ -120,7 +121,7 @@ export function AdminPanel() {
     e.preventDefault();
     setIsSubmittingUser(true);
     try {
-      const res = await fetch('/api/admin/users', {
+      const res = await apiFetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...newUser, tenant_id: user?.tenant_id, admin_id: user?.id }),
@@ -154,7 +155,7 @@ export function AdminPanel() {
     setConfirmDeleteSector(null);
     try {
       const url = `/api/admin/sectors/${id}?admin_id=${user?.id}`;
-      const res = await fetch(url, { method: 'DELETE' });
+      const res = await apiFetch(url, { method: 'DELETE' });
       if (res.ok) {
         setFeedback({ message: 'Setor excluído com sucesso!', type: 'success' });
         fetchData();
@@ -186,7 +187,7 @@ export function AdminPanel() {
     setConfirmDeleteUser(null);
     try {
       const url = `/api/admin/users/${id}?admin_id=${user?.id}`;
-      const res = await fetch(url, { method: 'DELETE' });
+      const res = await apiFetch(url, { method: 'DELETE' });
       if (res.ok) {
         setFeedback({ message: 'Usuário excluído com sucesso!', type: 'success' });
         fetchData();

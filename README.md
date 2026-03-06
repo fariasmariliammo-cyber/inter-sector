@@ -1,20 +1,26 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Gestão 360
 
-# Run and deploy your AI Studio app
+Aplicacao de gestao intersetorial com arquitetura **frontend-only + Supabase** (React + Vite, sem Next.js).
 
-This contains everything you need to run your app locally.
+## Stack
 
-View your app in AI Studio: https://ai.studio/apps/06ecd0ce-1ada-4703-bb46-7d3973adc3f2
+- Frontend: React + Vite + Tailwind CSS
+- Backend-as-a-Service: Supabase (Auth, Postgres, Storage)
+- Deploy: build estatico
 
-## Run Locally
+## Executar localmente
 
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
+1. Instale dependencias:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Crie o arquivo `.env` com base em `.env.example` e configure:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+3. Rode em desenvolvimento:
    `npm run dev`
+
+## Scripts
+
+- `npm run dev`: inicia Vite em modo desenvolvimento
+- `npm run build`: gera build de producao
+- `npm run start`: sobe preview local da build
+- `npm run lint`: roda typecheck (`tsc --noEmit`)
