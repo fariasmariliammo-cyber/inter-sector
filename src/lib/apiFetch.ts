@@ -19,6 +19,15 @@ function toNumber(value: unknown): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
+function parseNumberList(value: string | null): number[] {
+  if (!value) return [];
+
+  return value
+    .split(',')
+    .map((part) => Number(part.trim()))
+    .filter((part) => !Number.isNaN(part));
+}
+
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
@@ -340,7 +349,7 @@ async function handleListTickets(url: URL): Promise<Response> {
   const sectorExecutor = url.searchParams.get('sector_executor');
   const userSolicitor = url.searchParams.get('user_solicitor');
   const userExecutor = url.searchParams.get('user_executor');
-  const statusId = url.searchParams.get('status_id');
+  const statusIds = parseNumberList(url.searchParams.get('status_id'));
   const limitParam = toNumber(url.searchParams.get('limit'));
   const offsetParam = toNumber(url.searchParams.get('offset'));
   const limit = Math.min(Math.max(limitParam ?? 50, 1), 200);
@@ -367,7 +376,8 @@ async function handleListTickets(url: URL): Promise<Response> {
   if (sectorExecutor) query = query.eq('executor_sector_id', sectorExecutor);
   if (userSolicitor) query = query.eq('solicitor_id', userSolicitor);
   if (userExecutor) query = query.eq('executor_id', userExecutor);
-  if (statusId) query = query.eq('status_id', statusId);
+  if (statusIds.length === 1) query = query.eq('status_id', statusIds[0]);
+  if (statusIds.length > 1) query = query.in('status_id', statusIds);
 
   const { data: tickets, error } = await query
     .order('created_at', { ascending: false })

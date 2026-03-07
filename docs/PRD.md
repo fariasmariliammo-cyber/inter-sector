@@ -11,6 +11,8 @@ Gestão 360 is a platform designed to manage and streamline communication and ta
 2. **Ticket Management**: Create, view, and update tickets across sectors.
    - Tickets must define a solicitor sector and an executor sector.
    - Linear status progression (Aberto -> Em Atendimento -> Em Revisao -> Concluido).
+   - The default tickets view must open filtered by the logged-in user's executor sector, since the primary user workflow is to resolve their own sector queue.
+   - The status filter in the tickets list must support selecting multiple statuses at once, and the default queue should start with Aberto + Em Atendimento selected.
 3. **Admin Panel**: Management of sectors and users within a tenant.
 4. **Notifications**: Real-time or polled notifications for ticket updates and mentions, via app and e-mail.
 5. **Storage**: File attachment support for tickets and comments.

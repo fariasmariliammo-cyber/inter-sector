@@ -6,7 +6,7 @@ import {
   Plus, Search, Bell, User as UserIcon, LogOut, 
   MessageSquare, ChevronRight, Moon, Sun,
   CheckCircle2, Clock, AlertCircle, Send, X, Shield, Settings, Mail, Lock, Paperclip, FileText, Download, Edit,
-  BarChart3, LayoutGrid, Menu, ArrowLeft, Zap, Users as UsersIcon, Sparkles, Building2
+  BarChart3, LayoutGrid, Menu, ArrowLeft, Zap, Users as UsersIcon, Sparkles, Building2, Filter
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AdminPanel } from './components/AdminPanel';
@@ -25,9 +25,22 @@ type AppShellContext = {
 };
 
 type AuthMode = 'login' | 'register';
+type TicketFilters = {
+  sector_solicitor: string;
+  sector_executor: string;
+  status_ids: string[];
+  search: string;
+};
 
 const isThemeValue = (value: string | null): value is 'light' | 'dark' =>
   value === 'light' || value === 'dark';
+
+const areTicketFiltersEqual = (a: TicketFilters, b: TicketFilters) =>
+  a.sector_solicitor === b.sector_solicitor &&
+  a.sector_executor === b.sector_executor &&
+  a.search === b.search &&
+  a.status_ids.length === b.status_ids.length &&
+  a.status_ids.every((value, index) => value === b.status_ids[index]);
 
 const fetchWithRetry = async (url: string, options?: RequestInit, retries = 3): Promise<any> => {
   try {
@@ -1103,14 +1116,56 @@ function TicketsPage() {
   const [statuses, setStatuses] = useState<Status[]>([]);
   const [showNewTicket, setShowNewTicket] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
-  
-  const [filters, setFilters] = useState({
+  const [showStatusFilter, setShowStatusFilter] = useState(false);
+  const statusFilterRef = useRef<HTMLDivElement | null>(null);
+
+  const createDefaultTicketFilters = (sectorId?: number, availableStatuses: Status[] = []): TicketFilters => ({
     sector_solicitor: '',
-    sector_executor: '',
-    status_id: '',
+    sector_executor: sectorId ? String(sectorId) : '',
+    status_ids: availableStatuses
+      .filter((status) => status.sequence === 1 || status.sequence === 2)
+      .sort((a, b) => a.sequence - b.sequence)
+      .map((status) => String(status.id)),
     search: ''
   });
-  const hasActiveFilters = Object.values(filters).some(Boolean);
+
+  const defaultFilters = createDefaultTicketFilters(user?.sector_id, statuses);
+  const [filters, setFilters] = useState<TicketFilters>(() => createDefaultTicketFilters(user?.sector_id));
+  const hasActiveFilters = !areTicketFiltersEqual(filters, defaultFilters);
+
+  const selectedStatusLabels = statuses
+    .filter((status) => filters.status_ids.includes(String(status.id)))
+    .sort((a, b) => a.sequence - b.sequence)
+    .map((status) => status.name);
+
+  useEffect(() => {
+    const onClickOutside = (event: MouseEvent) => {
+      const container = statusFilterRef.current;
+      if (!container) return;
+      if (event.target instanceof Node && !container.contains(event.target)) {
+        setShowStatusFilter(false);
+      }
+    };
+
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  useEffect(() => {
+    setFilters((current) => {
+      const currentMatchesDefaultQueue =
+        current.sector_executor === (user?.sector_id ? String(user.sector_id) : '') &&
+        current.sector_solicitor === '' &&
+        current.search === '' &&
+        current.status_ids.length <= 2;
+
+      if (currentMatchesDefaultQueue || areTicketFiltersEqual(current, defaultFilters)) {
+        return defaultFilters;
+      }
+
+      return current;
+    });
+  }, [user?.id, user?.sector_id, statuses]);
 
   const fetchTickets = async (options?: { append?: boolean }) => {
     const offset = options?.append ? tickets.length : 0;
@@ -1121,8 +1176,13 @@ function TicketsPage() {
       role: user?.role || '',
       limit: String(limit),
       offset: String(offset),
-      ...filters
+      sector_solicitor: filters.sector_solicitor,
+      sector_executor: filters.sector_executor,
+      search: filters.search,
     });
+    if (filters.status_ids.length > 0) {
+      params.set('status_id', filters.status_ids.join(','));
+    }
     try {
       if (options?.append) setTicketsLoadingMore(true);
       const data = await fetchWithRetry(`/api/tickets?${params}`);
@@ -1155,6 +1215,11 @@ function TicketsPage() {
           <div>
             <h2 className="text-3xl font-bold tracking-tight">Tickets</h2>
             <p className="text-muted-foreground">Priorize, filtre e acompanhe demandas intersetoriais de {user?.tenant_name}</p>
+            {user?.sector_name && (
+              <p className="mt-2 text-xs font-bold uppercase tracking-[0.22em] text-primary">
+                Fila inicial: setor executor {user.sector_name}
+              </p>
+            )}
           </div>
           <button 
             onClick={() => setShowNewTicket(true)}
@@ -1181,14 +1246,74 @@ function TicketsPage() {
             <option value="">Setor Executor</option>
             {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
-          <select
-            className="ui-select text-sm"
-            value={filters.status_id}
-            onChange={e => setFilters({...filters, status_id: e.target.value})}
-          >
-            <option value="">Status</option>
-            {statuses.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <div ref={statusFilterRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setShowStatusFilter((prev) => !prev)}
+              className="ui-select flex w-full items-center justify-between gap-3 text-sm"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <Filter size={15} className="shrink-0 text-muted-foreground" />
+                <span className="truncate">
+                  {selectedStatusLabels.length > 0 ? selectedStatusLabels.join(' + ') : 'Todos os status'}
+                </span>
+              </span>
+              <ChevronRight size={16} className={`shrink-0 transition-transform ${showStatusFilter ? 'rotate-90' : ''}`} />
+            </button>
+
+            <AnimatePresence>
+              {showStatusFilter && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 8 }}
+                  className="absolute left-0 top-full z-20 mt-2 w-full min-w-[240px] rounded-2xl border border-border/75 bg-card/98 p-2 shadow-2xl backdrop-blur-xl"
+                >
+                  <div className="border-b border-border/70 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
+                    Status visiveis
+                  </div>
+                  <div className="max-h-64 overflow-y-auto py-2">
+                    {statuses
+                      .slice()
+                      .sort((a, b) => a.sequence - b.sequence)
+                      .map((status) => {
+                        const statusId = String(status.id);
+                        const checked = filters.status_ids.includes(statusId);
+
+                        return (
+                          <label
+                            key={status.id}
+                            className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-muted/50"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setFilters((current) => {
+                                  const nextStatusIds = checked
+                                    ? current.status_ids.filter((id) => id !== statusId)
+                                    : [...current.status_ids, statusId];
+
+                                  return {
+                                    ...current,
+                                    status_ids: statuses
+                                      .filter((item) => nextStatusIds.includes(String(item.id)))
+                                      .sort((a, b) => a.sequence - b.sequence)
+                                      .map((item) => String(item.id))
+                                  };
+                                });
+                              }}
+                              className="h-4 w-4 rounded border-border text-primary focus:ring-primary/25"
+                            />
+                            <span className="flex-1">{status.name}</span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -1201,7 +1326,7 @@ function TicketsPage() {
           <button
             type="button"
             disabled={!hasActiveFilters}
-            onClick={() => setFilters({ sector_solicitor: '', sector_executor: '', status_id: '', search: '' })}
+            onClick={() => setFilters(defaultFilters)}
             className="ui-btn-secondary h-full disabled:opacity-45"
           >
             Limpar filtros
