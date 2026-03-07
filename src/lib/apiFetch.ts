@@ -144,19 +144,15 @@ async function notifyTicketParticipants(params: {
   );
 
   try {
-    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-    const accessToken = sessionData?.session?.access_token;
-    if (sessionError || !accessToken) {
-      console.error('Failed to trigger ticket notification email: missing authenticated session.', {
-        sessionError,
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData?.user) {
+      console.error('Failed to trigger ticket notification email: missing authenticated user.', {
+        authError,
       });
       return;
     }
 
     const { data, error } = await supabase.functions.invoke('send-ticket-notification-email', {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
       body: {
         ticket_id: ticketId,
         content,
@@ -804,9 +800,8 @@ async function handleAdminCreateUser(init?: RequestInit): Promise<Response> {
   if (error) return errorResponse(error.message, 400);
 
   try {
-    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-    const accessToken = sessionData?.session?.access_token;
-    if (sessionError || !accessToken) {
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData?.user) {
       await supabase.from('users').delete().eq('id', result.id);
       return errorResponse(
         'Sessao autenticada nao encontrada para envio do convite por e-mail. O usuario nao foi criado.',
@@ -817,9 +812,6 @@ async function handleAdminCreateUser(init?: RequestInit): Promise<Response> {
     const { data: inviteResult, error: inviteError } = await supabase.functions.invoke(
       'send-user-invitation-email',
       {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
         body: {
           invited_user_id: result.id,
           invited_user_name: cleanName,
