@@ -1,6 +1,8 @@
 import { supabase } from './supabaseClient';
 
 type JsonMap = Record<string, any>;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -78,6 +80,42 @@ async function parseJsonBody(init?: RequestInit): Promise<JsonMap> {
   return {};
 }
 
+async function invokeAuthenticatedEdgeFunction(
+  functionName: string,
+  body: JsonMap,
+): Promise<{ data: JsonMap | null; error: string | null; status: number }> {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  const accessToken = sessionData?.session?.access_token;
+  if (sessionError || !accessToken) {
+    return { data: null, error: 'Missing authenticated session.', status: 401 };
+  }
+
+  const endpoint = `${supabaseUrl}/functions/v1/${functionName}`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  let payload: JsonMap | null = null;
+  try {
+    payload = (await response.json()) as JsonMap;
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const message = String(payload?.error || payload?.message || `Edge function HTTP ${response.status}`);
+    return { data: payload, error: message, status: response.status };
+  }
+
+  return { data: payload, error: null, status: response.status };
+}
+
 async function getTicketMentionUserIds(ticketId: number): Promise<number[]> {
   const { data, error } = await supabase
     .from('ticket_mentions')
@@ -152,16 +190,17 @@ async function notifyTicketParticipants(params: {
       return;
     }
 
-    const { data, error } = await supabase.functions.invoke('send-ticket-notification-email', {
-      body: {
-        ticket_id: ticketId,
-        content,
-        actor_user_id: actorUserId ?? null,
-      },
+    const invokeResult = await invokeAuthenticatedEdgeFunction('send-ticket-notification-email', {
+      ticket_id: ticketId,
+      content,
+      actor_user_id: actorUserId ?? null,
     });
 
-    if (error || (data as JsonMap | null)?.error) {
-      console.error('Failed to trigger ticket notification email:', error || (data as JsonMap).error);
+    if (invokeResult.error || invokeResult.data?.error) {
+      console.error(
+        'Failed to trigger ticket notification email:',
+        invokeResult.error || invokeResult.data?.error,
+      );
     }
   } catch (error) {
     console.error('Failed to trigger ticket notification email:', error);
@@ -809,25 +848,20 @@ async function handleAdminCreateUser(init?: RequestInit): Promise<Response> {
       );
     }
 
-    const { data: inviteResult, error: inviteError } = await supabase.functions.invoke(
-      'send-user-invitation-email',
-      {
-        body: {
-          invited_user_id: result.id,
-          invited_user_name: cleanName,
-          invited_user_email: cleanEmail,
-          tenant_id: tenantId,
-          sector_id: sectorId,
-          role: cleanRole,
-          admin_user_id: adminId,
-        },
-      },
-    );
+    const inviteInvoke = await invokeAuthenticatedEdgeFunction('send-user-invitation-email', {
+      invited_user_id: result.id,
+      invited_user_name: cleanName,
+      invited_user_email: cleanEmail,
+      tenant_id: tenantId,
+      sector_id: sectorId,
+      role: cleanRole,
+      admin_user_id: adminId,
+    });
 
-    if (inviteError || inviteResult?.error) {
+    if (inviteInvoke.error || inviteInvoke.data?.error) {
       await supabase.from('users').delete().eq('id', result.id);
       return errorResponse(
-        inviteResult?.error || 'Nao foi possivel enviar o e-mail de convite. O usuario nao foi criado.',
+        inviteInvoke.error || inviteInvoke.data?.error || 'Nao foi possivel enviar o e-mail de convite. O usuario nao foi criado.',
         502,
       );
     }
