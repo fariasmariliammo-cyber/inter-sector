@@ -225,7 +225,7 @@ export function AdminPanel() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left Column: Sectors */}
         <div className="lg:col-span-4 space-y-8">
-          <section className="bg-card border rounded-3xl p-6 shadow-sm space-y-6">
+          <section className="ui-surface p-6 space-y-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
@@ -245,13 +245,13 @@ export function AdminPanel() {
                   value={newSectorName}
                   onChange={(e) => setNewSectorName(e.target.value)}
                   placeholder="Nome do setor (ex: RH, TI)"
-                  className="w-full p-4 pr-12 rounded-2xl border bg-background focus:ring-2 focus:ring-primary outline-none transition-all placeholder:text-muted-foreground/50"
+                  className="ui-input w-full pr-12 placeholder:text-muted-foreground/50"
                   required
                 />
                 <button 
                   type="submit" 
                   disabled={isSubmittingSector}
-                  className="absolute right-2 top-2 p-2 bg-primary text-primary-foreground rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
+                  className="ui-btn-primary absolute right-2 top-2 p-2 rounded-xl disabled:opacity-50"
                 >
                   {isSubmittingSector ? <Loader2 size={20} className="animate-spin" /> : <Plus size={20} />}
                 </button>
@@ -263,7 +263,7 @@ export function AdminPanel() {
                 <motion.div 
                   layout
                   key={s.id} 
-                  className="group p-4 rounded-2xl border bg-background/50 hover:bg-background hover:shadow-md transition-all flex justify-between items-center"
+                  className="group p-4 rounded-2xl border border-border/70 bg-background/65 hover:bg-background hover:shadow-md transition-all flex justify-between items-center"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-2 h-2 rounded-full bg-primary/40 group-hover:bg-primary transition-colors" />
@@ -331,7 +331,7 @@ export function AdminPanel() {
             </div>
 
             {/* Create User Form */}
-            <form onSubmit={handleCreateUser} className="bg-card border rounded-3xl p-8 shadow-sm space-y-6 relative overflow-hidden">
+            <form onSubmit={handleCreateUser} className="ui-surface p-8 space-y-6 relative overflow-hidden">
               <div className="absolute top-0 left-0 w-1 h-full bg-primary/20" />
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -343,7 +343,7 @@ export function AdminPanel() {
                       type="text"
                       value={newUser.name}
                       onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                      className="w-full p-4 pl-12 rounded-2xl border bg-background focus:ring-2 focus:ring-primary outline-none transition-all"
+                      className="ui-input w-full pl-12"
                       placeholder="João Silva"
                       required
                     />
@@ -358,7 +358,7 @@ export function AdminPanel() {
                       type="email"
                       value={newUser.email}
                       onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                      className="w-full p-4 pl-12 rounded-2xl border bg-background focus:ring-2 focus:ring-primary outline-none transition-all"
+                      className="ui-input w-full pl-12"
                       placeholder="joao@empresa.com"
                       required
                     />
@@ -370,7 +370,7 @@ export function AdminPanel() {
                   <select
                     value={newUser.sector_id}
                     onChange={(e) => setNewUser({ ...newUser, sector_id: e.target.value })}
-                    className="w-full p-4 rounded-2xl border bg-background focus:ring-2 focus:ring-primary outline-none transition-all appearance-none cursor-pointer"
+                    className="ui-select w-full p-4"
                     required
                   >
                     <option value="">Selecione um setor...</option>
@@ -402,7 +402,7 @@ export function AdminPanel() {
               <button 
                 type="submit" 
                 disabled={isSubmittingUser}
-                className="w-full py-4 bg-primary text-primary-foreground rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3 hover:opacity-90 transition-all shadow-lg shadow-primary/20 disabled:opacity-50"
+                className="ui-btn-primary w-full py-4 uppercase tracking-widest flex items-center justify-center gap-3 shadow-[0_20px_45px_-30px_rgba(var(--primary-rgb),0.75)] disabled:opacity-50"
               >
                 {isSubmittingUser ? <Loader2 size={20} className="animate-spin" /> : <UserPlus size={20} />}
                 Confirmar Convite
@@ -410,7 +410,7 @@ export function AdminPanel() {
             </form>
 
             {/* Users Table */}
-            <div className="bg-card border rounded-3xl overflow-hidden shadow-sm">
+            <div className="ui-surface overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>

@@ -7,6 +7,7 @@ Gestão 360 is a platform designed to manage and streamline communication and ta
 ## Core Features
 
 1. **Authentication**: Supabase-based authentication with organization (tenant) isolation.
+   - The public experience must present a short landing page before the login/register form, explaining the product value and main capabilities.
 2. **Ticket Management**: Create, view, and update tickets across sectors.
    - Tickets must define a solicitor sector and an executor sector.
    - Linear status progression (Aberto -> Em Atendimento -> Em Revisao -> Concluido).

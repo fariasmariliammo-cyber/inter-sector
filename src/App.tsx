@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Routes, Route, Navigate, NavLink, Outlet, useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import { Ticket, Sector, User, Status, Comment, Notification } from './types';
@@ -6,7 +6,7 @@ import {
   Plus, Search, Bell, User as UserIcon, LogOut, 
   MessageSquare, ChevronRight, Moon, Sun,
   CheckCircle2, Clock, AlertCircle, Send, X, Shield, Settings, Mail, Lock, Paperclip, FileText, Download, Edit,
-  BarChart3, LayoutGrid, Menu
+  BarChart3, LayoutGrid, Menu, ArrowLeft, Zap, Users as UsersIcon, Sparkles, Building2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AdminPanel } from './components/AdminPanel';
@@ -16,11 +16,18 @@ import { ToastProvider, useToast } from './components/Toast';
 const TICKETS_PAGE_SIZE = 50;
 const COMMENTS_PAGE_SIZE = 100;
 const METRICS_TICKETS_LIMIT = 200;
+const THEME_STORAGE_PREFIX = 'gestao360:theme';
+const getThemeStorageKey = (userId?: number | null) => `${THEME_STORAGE_PREFIX}:${userId ?? 'default'}`;
 
 type AppShellContext = {
   notifications: Notification[];
   markAsRead: (id: number) => Promise<void>;
 };
+
+type AuthMode = 'login' | 'register';
+
+const isThemeValue = (value: string | null): value is 'light' | 'dark' =>
+  value === 'light' || value === 'dark';
 
 const fetchWithRetry = async (url: string, options?: RequestInit, retries = 3): Promise<any> => {
   try {
@@ -41,13 +48,17 @@ const fetchWithRetry = async (url: string, options?: RequestInit, retries = 3): 
   }
 };
 
-function Login() {
+function Login({ initialMode = 'login', onBack }: { initialMode?: AuthMode; onBack?: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [isRegistering, setIsRegistering] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(initialMode === 'register');
   const { login, signup } = useAuth();
   const toast = useToast();
+
+  useEffect(() => {
+    setIsRegistering(initialMode === 'register');
+  }, [initialMode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,30 +74,44 @@ function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(var(--primary-rgb),0.05),transparent_50%)]" />
+    <div className="relative min-h-screen flex items-center justify-center p-4 sm:p-6">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_14%,rgba(var(--primary-rgb),0.2),transparent_34%),radial-gradient(circle_at_85%_12%,rgba(14,165,233,0.16),transparent_36%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(150deg,rgba(255,255,255,0.52)_0%,rgba(255,255,255,0)_45%)] dark:bg-[linear-gradient(145deg,rgba(6,19,23,0.2)_0%,rgba(6,19,23,0)_48%)]" />
       
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         className="w-full max-w-md relative"
       >
-        <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-24 h-24 bg-primary/10 rounded-3xl rotate-12 blur-2xl" />
+        <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-24 h-24 bg-primary/20 rounded-3xl rotate-12 blur-2xl" />
         
-        <div className="bg-card border-2 rounded-[2.5rem] p-10 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50" />
+        <div className="ui-surface rounded-[2rem] p-8 sm:p-10 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/80 to-transparent opacity-80" />
           
-          <div className="text-center mb-10">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 text-primary mb-6">
+          {onBack && (
+            <div className="mb-6 flex justify-start">
+              <button
+                type="button"
+                onClick={onBack}
+                className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/70 px-4 py-2 text-xs font-bold uppercase tracking-wider text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+              >
+                <ArrowLeft size={14} />
+                Voltar
+              </button>
+            </div>
+          )}
+
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/12 text-primary mb-6 border border-primary/15">
               <Shield size={32} />
             </div>
             <h1 className="text-4xl font-black tracking-tighter mb-2">Gestão 360</h1>
-            <p className="text-muted-foreground font-medium">
-              {isRegistering ? 'Crie sua conta e organização' : 'Bem-vindo de volta'}
+            <p className="text-muted-foreground font-semibold">
+              {isRegistering ? 'Crie sua conta e a estrutura inicial do tenant' : 'Entre para acompanhar tickets e prioridades'}
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-5">
             {isRegistering && (
               <div className="space-y-2">
                 <label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">
@@ -99,7 +124,7 @@ function Login() {
                     name="name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full p-4 pl-12 rounded-2xl border bg-background focus:ring-2 focus:ring-primary outline-none transition-all font-medium"
+                    className="ui-input w-full pl-12 font-medium"
                     placeholder="Seu nome completo"
                     autoComplete="name"
                     required={isRegistering}
@@ -119,7 +144,7 @@ function Login() {
                   name="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full p-4 pl-12 rounded-2xl border bg-background focus:ring-2 focus:ring-primary outline-none transition-all font-medium"
+                  className="ui-input w-full pl-12 font-medium"
                   placeholder="seu@email.com"
                   autoComplete="email"
                   required
@@ -138,7 +163,7 @@ function Login() {
                   name="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full p-4 pl-12 rounded-2xl border bg-background focus:ring-2 focus:ring-primary outline-none transition-all font-medium"
+                  className="ui-input w-full pl-12 font-medium"
                   placeholder="••••••••"
                   autoComplete={isRegistering ? 'new-password' : 'current-password'}
                   required
@@ -149,16 +174,16 @@ function Login() {
 
             <button
               type="submit"
-              className="w-full py-4 bg-primary text-primary-foreground rounded-2xl font-black uppercase tracking-widest hover:opacity-90 transition-all shadow-lg shadow-primary/20 active:scale-[0.98]"
+              className="ui-btn-primary w-full py-4 uppercase tracking-wider shadow-[0_20px_45px_-28px_rgba(var(--primary-rgb),0.75)]"
             >
               {isRegistering ? 'Cadastrar' : 'Entrar'}
             </button>
           </form>
 
-          <div className="mt-8 pt-8 border-t flex flex-col gap-4 text-center">
+          <div className="mt-8 pt-6 border-t border-border/70 flex flex-col gap-3 text-center">
             <button 
               onClick={() => setIsRegistering(!isRegistering)}
-              className="text-sm font-bold text-primary hover:underline transition-all"
+              className="text-sm font-bold text-primary/90 hover:text-primary transition-colors"
             >
               {isRegistering ? 'Já possui acesso? Faça login' : 'Não tem conta? Cadastre-se agora'}
             </button>
@@ -167,6 +192,209 @@ function Login() {
       </motion.div>
     </div>
   );
+}
+
+function PublicLanding({
+  onSelectMode,
+  theme,
+  onToggleTheme
+}: {
+  onSelectMode: (mode: AuthMode) => void;
+  theme: 'light' | 'dark';
+  onToggleTheme: () => void;
+}) {
+  const highlights = [
+    {
+      title: 'Chamados intersetoriais sem ruído',
+      description: 'Centralize solicitações entre áreas com fluxo claro de origem, execução e acompanhamento.',
+      icon: <Zap size={18} />
+    },
+    {
+      title: 'Visão operacional em tempo real',
+      description: 'Dashboard, fila pessoal, tickets recentes e notificações em um único painel.',
+      icon: <BarChart3 size={18} />
+    },
+    {
+      title: 'Governança para admins',
+      description: 'Gerencie setores, usuários e estrutura do tenant sem sair da aplicação.',
+      icon: <UsersIcon size={18} />
+    }
+  ];
+
+  const featurePills = ['Tickets', 'Dashboard', 'Notificações', 'Administração', 'Anexos'];
+
+  return (
+    <div className="relative min-h-screen overflow-hidden px-4 py-6 sm:px-6 lg:px-10">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_10%,rgba(var(--primary-rgb),0.22),transparent_32%),radial-gradient(circle_at_88%_8%,rgba(14,165,233,0.16),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.35),rgba(255,255,255,0))] dark:bg-[radial-gradient(circle_at_12%_10%,rgba(var(--primary-rgb),0.18),transparent_32%),radial-gradient(circle_at_88%_8%,rgba(56,189,248,0.16),transparent_36%),linear-gradient(180deg,rgba(6,16,19,0.08),rgba(6,16,19,0))]" />
+
+      <div className="relative mx-auto flex min-h-[calc(100vh-3rem)] max-w-7xl flex-col gap-8">
+        <header className="flex items-center justify-between rounded-full border border-border/70 bg-card/65 px-5 py-3 backdrop-blur-xl">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-primary/20 bg-primary/12 text-primary">
+              <Building2 size={20} />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-muted-foreground">Gestão 360</p>
+              <p className="text-sm font-semibold">Coordenação entre setores com contexto compartilhado</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border/70 bg-background/80 transition-colors hover:bg-muted/60"
+              aria-label={`Ativar tema ${theme === 'light' ? 'escuro' : 'claro'}`}
+              title={`Ativar tema ${theme === 'light' ? 'escuro' : 'claro'}`}
+            >
+              {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectMode('login')}
+              className="hidden rounded-full border border-border/70 bg-background/80 px-4 py-2 text-sm font-bold transition-colors hover:bg-muted/60 md:inline-flex"
+            >
+              Entrar
+            </button>
+          </div>
+        </header>
+
+        <div className="grid flex-1 items-center gap-8 lg:grid-cols-[1.15fr_0.85fr]">
+          <section className="space-y-8">
+            <motion.div
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-6"
+            >
+              <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-2 text-xs font-black uppercase tracking-[0.22em] text-primary">
+                <Sparkles size={14} />
+                Fluxo intersetorial sem atrito
+              </div>
+
+              <div className="space-y-4">
+                <h1 className="max-w-3xl text-5xl font-black leading-none tracking-tight sm:text-6xl">
+                  Organize pedidos entre setores sem perder contexto, prioridade ou prazo.
+                </h1>
+                <p className="max-w-2xl text-lg font-medium leading-8 text-muted-foreground">
+                  O Gestão 360 concentra tickets, responsáveis, notificações e status em uma operação única para times que dependem uns dos outros.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => onSelectMode('login')}
+                  className="ui-btn-primary px-7 py-4 text-sm uppercase tracking-wider"
+                >
+                  Entrar na plataforma
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelectMode('register')}
+                  className="ui-btn-secondary px-7 py-4 text-sm uppercase tracking-wider"
+                >
+                  Criar conta
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {featurePills.map((pill) => (
+                  <span key={pill} className="ui-chip">
+                    {pill}
+                  </span>
+                ))}
+              </div>
+            </motion.div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              {highlights.map((item, index) => (
+                <motion.div
+                  key={item.title}
+                  initial={{ opacity: 0, y: 18 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.08 * (index + 1) }}
+                  className="ui-surface-soft p-5"
+                >
+                  <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary">
+                    {item.icon}
+                  </div>
+                  <h2 className="text-lg font-bold">{item.title}</h2>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.description}</p>
+                </motion.div>
+              ))}
+            </div>
+          </section>
+
+          <motion.aside
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="ui-surface relative overflow-hidden p-6 sm:p-8"
+          >
+            <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-transparent via-primary/90 to-transparent" />
+            <div className="space-y-6">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-primary">Como o produto funciona</p>
+                <h2 className="mt-3 text-3xl font-black tracking-tight">Uma trilha simples para cada demanda</h2>
+                <p className="mt-3 text-sm leading-7 text-muted-foreground">
+                  Cada ticket nasce com setor solicitante e executor, percorre status lineares e mantém histórico, anexos e notificações no mesmo lugar.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="rounded-2xl border border-border/70 bg-background/75 p-4">
+                  <p className="text-xs font-black uppercase tracking-wider text-primary">1. Solicitar</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Abra um ticket e direcione para o setor executor certo.</p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-background/75 p-4">
+                  <p className="text-xs font-black uppercase tracking-wider text-primary">2. Acompanhar</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Use dashboard, comentários e notificações para destravar a execução.</p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-background/75 p-4">
+                  <p className="text-xs font-black uppercase tracking-wider text-primary">3. Governar</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Admins mantêm setores e usuários organizados dentro do tenant.</p>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-primary/15 bg-primary/8 p-5">
+                <p className="text-sm font-semibold text-foreground">Pronto para centralizar a operação?</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Entre para acessar o ambiente da sua organização ou crie a estrutura inicial em poucos passos.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onSelectMode('login')}
+                  className="mt-4 inline-flex items-center gap-2 text-sm font-black uppercase tracking-wider text-primary"
+                >
+                  Acessar agora
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          </motion.aside>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PublicExperience() {
+  const [authMode, setAuthMode] = useState<AuthMode | null>(null);
+  const themeStorageKey = getThemeStorageKey();
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const persisted = localStorage.getItem(themeStorageKey);
+    return isThemeValue(persisted) ? persisted : 'light';
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    localStorage.setItem(themeStorageKey, theme);
+  }, [theme, themeStorageKey]);
+
+  if (authMode) {
+    return <Login initialMode={authMode} onBack={() => setAuthMode(null)} />;
+  }
+
+  return <PublicLanding onSelectMode={setAuthMode} theme={theme} onToggleTheme={() => setTheme((prev) => prev === 'light' ? 'dark' : 'light')} />;
 }
 
 function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: () => void }) {
@@ -253,13 +481,13 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/45 backdrop-blur-md flex items-center justify-center z-50 p-4">
       <motion.div 
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="bg-card w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border"
+        className="ui-surface w-full max-w-2xl rounded-3xl overflow-hidden"
       >
-        <div className="p-6 border-b flex justify-between items-center bg-muted/30">
+        <div className="p-6 border-b border-border/70 flex justify-between items-center bg-muted/35">
           <h2 className="text-xl font-bold">Novo Ticket</h2>
           <button onClick={onClose} className="p-2 hover:bg-muted rounded-full transition-colors"><X size={20}/></button>
         </div>
@@ -270,7 +498,7 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
               required
               value={formData.title}
               onChange={e => setFormData({...formData, title: e.target.value})}
-              className="w-full p-2 border rounded-lg bg-background"
+              className="ui-input w-full"
             />
           </div>
           <div>
@@ -279,7 +507,7 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
               required
               value={formData.executor_sector_id}
               onChange={e => setFormData({...formData, executor_sector_id: e.target.value, executor_id: ''})}
-              className="w-full p-2 border rounded-lg bg-background"
+              className="ui-select w-full"
             >
               <option value="">Selecione o setor</option>
               {sectors.filter(s => s.id !== user?.sector_id).map(s => (
@@ -292,7 +520,7 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
             <select
               value={formData.executor_id}
               onChange={e => setFormData({...formData, executor_id: e.target.value})}
-              className="w-full p-2 border rounded-lg bg-background"
+              className="ui-select w-full"
               disabled={!formData.executor_sector_id}
             >
               <option value="">Selecione o executor</option>
@@ -308,14 +536,14 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
               rows={4}
               value={formData.description}
               onChange={e => setFormData({...formData, description: e.target.value})}
-              className="w-full p-2 border rounded-lg bg-background resize-none"
+              className="ui-input w-full resize-none"
             />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Anexos</label>
             <div className="flex flex-wrap gap-2 mb-2">
               {formData.attachments.map((url, i) => (
-                <div key={i} className="flex items-center gap-2 bg-muted p-2 rounded-lg text-xs">
+                <div key={i} className="flex items-center gap-2 bg-muted/70 border border-border/60 p-2 rounded-xl text-xs">
                   <FileText size={14} />
                   <span className="truncate max-w-[100px]">Anexo {i + 1}</span>
                   <button 
@@ -328,15 +556,15 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
                 </div>
               ))}
             </div>
-            <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed rounded-xl cursor-pointer hover:bg-muted/50 transition-colors">
+            <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-border/80 rounded-xl cursor-pointer hover:bg-muted/50 transition-colors">
               <Paperclip size={18} className={uploading ? 'animate-pulse' : ''} />
               <span className="text-sm font-medium">{uploading ? 'Enviando...' : 'Adicionar Anexo'}</span>
               <input type="file" className="hidden" onChange={handleFileUpload} disabled={uploading} />
             </label>
           </div>
           <div className="flex justify-end gap-3 pt-4">
-            <button type="button" onClick={onClose} className="px-4 py-2 hover:bg-muted rounded-lg transition-colors">Cancelar</button>
-            <button type="submit" className="px-6 py-2 bg-primary text-primary-foreground rounded-lg font-semibold hover:opacity-90 transition-opacity">Criar Ticket</button>
+            <button type="button" onClick={onClose} className="ui-btn-secondary px-4 py-2">Cancelar</button>
+            <button type="submit" className="ui-btn-primary px-6 py-2">Criar Ticket</button>
           </div>
         </form>
       </motion.div>
@@ -538,11 +766,11 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
   const nextStatus = statuses.find(s => s.sequence === ticket.status_sequence + 1);
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/45 backdrop-blur-md flex items-center justify-center z-50 p-4">
       <motion.div 
         initial={{ x: '100%' }}
         animate={{ x: 0 }}
-        className="bg-card w-full max-w-3xl h-full max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border"
+        className="ui-surface w-full max-w-3xl h-full max-h-[90vh] rounded-3xl flex flex-col overflow-hidden"
       >
         <div className="p-6 border-b bg-muted/30 flex justify-between items-start">
           <div>
@@ -590,7 +818,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
                   type="text"
                   value={editTitle}
                   onChange={e => setEditTitle(e.target.value)}
-                  className="w-full p-3 rounded-xl border bg-background focus:ring-2 focus:ring-primary outline-none"
+                  className="ui-input w-full"
                 />
               </div>
               <div className="space-y-2">
@@ -598,7 +826,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
                 <textarea 
                   value={editDescription}
                   onChange={e => setEditDescription(e.target.value)}
-                  className="w-full p-3 rounded-xl border bg-background focus:ring-2 focus:ring-primary outline-none min-h-[150px]"
+                  className="ui-input w-full min-h-[150px]"
                 />
               </div>
               <div className="space-y-2">
@@ -628,13 +856,13 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
                 <button 
                   onClick={handleSaveEdit}
                   disabled={isSavingEdit}
-                  className="flex-1 py-3 bg-primary text-primary-foreground rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
+                  className="ui-btn-primary flex-1 py-3 disabled:opacity-50"
                 >
                   {isSavingEdit ? 'Salvando...' : 'Salvar Alterações'}
                 </button>
                 <button 
                   onClick={() => setIsEditing(false)}
-                  className="px-6 py-3 bg-muted rounded-xl font-bold hover:bg-muted/80 transition-colors"
+                  className="ui-btn-secondary px-6 py-3"
                 >
                   Cancelar
                 </button>
@@ -716,10 +944,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
 
         <div className="p-6 border-t bg-muted/10 space-y-4">
           {nextStatus && (user?.id === ticket.executor_id || user?.role === 'admin') && (
-            <button 
-              onClick={handleNextStatus}
-              className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
-            >
+            <button onClick={handleNextStatus} className="ui-btn-primary w-full py-3 flex items-center justify-center gap-2">
               Mudar para: {nextStatus.name} <ChevronRight size={18}/>
             </button>
           )}
@@ -745,7 +970,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
                 value={newComment}
                 onChange={onCommentChange}
                 placeholder="Digite seu comentário... Use @ para mencionar"
-                className="w-full p-3 pr-24 rounded-xl border bg-background resize-none focus:ring-2 focus:ring-primary outline-none"
+                className="ui-input w-full pr-24 resize-none"
                 rows={2}
               />
               <div className="absolute right-3 bottom-3 flex items-center gap-2">
@@ -753,7 +978,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
                   <Paperclip size={18} className={uploadingComment ? 'animate-pulse' : ''} />
                   <input type="file" className="hidden" onChange={handleCommentFileUpload} disabled={uploadingComment} />
                 </label>
-                <button type="submit" className="p-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity">
+                <button type="submit" className="ui-btn-primary p-2 rounded-lg">
                   <Send size={18}/>
                 </button>
               </div>
@@ -821,11 +1046,11 @@ function TenantNameModal({ tenantId, currentName, onUpdated }: { tenantId: numbe
   };
 
   return (
-    <div className="fixed inset-0 bg-background/80 backdrop-blur-xl flex items-center justify-center z-[100] p-4">
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-md flex items-center justify-center z-[100] p-4">
       <motion.div 
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="bg-card w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl border-2 relative overflow-hidden"
+        className="ui-surface w-full max-w-md rounded-[2rem] p-8 sm:p-10 relative overflow-hidden"
       >
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary/50 via-primary to-primary/50" />
         <div className="text-center mb-8">
@@ -849,7 +1074,7 @@ function TenantNameModal({ tenantId, currentName, onUpdated }: { tenantId: numbe
                 value={name}
                 onChange={e => setName(e.target.value)}
                 placeholder="Ex: Minha Empresa LTDA"
-                className="w-full pl-12 pr-4 py-4 bg-muted/30 border-2 border-transparent focus:border-primary/20 focus:bg-background rounded-2xl outline-none transition-all font-medium"
+                className="ui-input w-full pl-12 pr-4 py-4 bg-muted/45 border-transparent font-medium"
               />
             </div>
           </div>
@@ -857,7 +1082,7 @@ function TenantNameModal({ tenantId, currentName, onUpdated }: { tenantId: numbe
           <button
             type="submit"
             disabled={loading || !name.trim()}
-            className="w-full py-4 bg-primary text-primary-foreground rounded-2xl font-bold text-lg shadow-lg shadow-primary/20 hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+            className="ui-btn-primary w-full py-4 text-lg shadow-[0_22px_48px_-30px_rgba(var(--primary-rgb),0.8)] disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {loading ? 'Salvando...' : 'Confirmar e Iniciar'}
             {!loading && <ChevronRight size={20} />}
@@ -885,6 +1110,7 @@ function TicketsPage() {
     status_id: '',
     search: ''
   });
+  const hasActiveFilters = Object.values(filters).some(Boolean);
 
   const fetchTickets = async (options?: { append?: boolean }) => {
     const offset = options?.append ? tickets.length : 0;
@@ -928,35 +1154,35 @@ function TicketsPage() {
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-3xl font-bold tracking-tight">Tickets</h2>
-            <p className="text-muted-foreground">Gerencie as demandas intersetoriais da {user?.tenant_name}</p>
+            <p className="text-muted-foreground">Priorize, filtre e acompanhe demandas intersetoriais de {user?.tenant_name}</p>
           </div>
           <button 
             onClick={() => setShowNewTicket(true)}
-            className="bg-primary text-primary-foreground px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:opacity-90 transition-opacity shadow-lg w-full md:w-auto"
+            className="ui-btn-primary px-6 py-3 flex items-center justify-center gap-2 shadow-[0_20px_45px_-28px_rgba(var(--primary-rgb),0.72)] w-full md:w-auto"
           >
             <Plus size={20}/> Novo Ticket
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-card/50 border rounded-2xl p-4">
-          <select 
-            className="bg-muted/40 border-none rounded-lg text-sm p-3 outline-none"
+        <div className="ui-surface-soft grid grid-cols-1 md:grid-cols-5 gap-3 p-4">
+          <select
+            className="ui-select text-sm"
             value={filters.sector_solicitor}
             onChange={e => setFilters({...filters, sector_solicitor: e.target.value})}
           >
             <option value="">Setor Solicitante</option>
             {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
-          <select 
-            className="bg-muted/40 border-none rounded-lg text-sm p-3 outline-none"
+          <select
+            className="ui-select text-sm"
             value={filters.sector_executor}
             onChange={e => setFilters({...filters, sector_executor: e.target.value})}
           >
             <option value="">Setor Executor</option>
             {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
-          <select 
-            className="bg-muted/40 border-none rounded-lg text-sm p-3 outline-none"
+          <select
+            className="ui-select text-sm"
             value={filters.status_id}
             onChange={e => setFilters({...filters, status_id: e.target.value})}
           >
@@ -969,9 +1195,17 @@ function TicketsPage() {
               value={filters.search}
               onChange={e => setFilters({...filters, search: e.target.value})}
               placeholder="Buscar por título ou #"
-              className="w-full bg-muted/40 border-none rounded-lg text-sm py-3 pl-9 pr-3 outline-none"
+              className="ui-input w-full text-sm py-3 pl-9 pr-3"
             />
           </div>
+          <button
+            type="button"
+            disabled={!hasActiveFilters}
+            onClick={() => setFilters({ sector_solicitor: '', sector_executor: '', status_id: '', search: '' })}
+            className="ui-btn-secondary h-full disabled:opacity-45"
+          >
+            Limpar filtros
+          </button>
         </div>
 
         {/* Persistent Notifications Popups */}
@@ -983,7 +1217,7 @@ function TicketsPage() {
                 initial={{ opacity: 0, x: 50 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="bg-card border-2 border-primary p-4 rounded-2xl shadow-2xl flex justify-between items-start gap-4"
+                className="ui-surface p-4 rounded-2xl border-primary/35 flex justify-between items-start gap-4"
               >
                 <div className="flex gap-3">
                   <div className="mt-1 text-primary"><AlertCircle size={18}/></div>
@@ -1002,7 +1236,7 @@ function TicketsPage() {
               layoutId={`ticket-${t.id}`}
               key={t.id}
               onClick={() => setSelectedTicketId(t.id)}
-              className="bg-card border rounded-2xl p-6 shadow-sm hover:shadow-xl transition-all cursor-pointer group relative overflow-hidden"
+              className="ui-surface-soft p-6 hover:-translate-y-1 hover:shadow-[0_20px_44px_-30px_rgba(var(--primary-rgb),0.7)] transition-all cursor-pointer group relative overflow-hidden"
             >
               <div className="absolute top-0 right-0 p-4">
                 <div className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
@@ -1045,7 +1279,7 @@ function TicketsPage() {
             <button
               onClick={() => fetchTickets({ append: true })}
               disabled={ticketsLoadingMore}
-              className="px-6 py-3 text-xs font-bold uppercase tracking-widest rounded-xl border bg-muted/30 hover:bg-muted transition-colors disabled:opacity-50"
+              className="ui-btn-secondary px-6 py-3 text-xs uppercase tracking-widest disabled:opacity-50"
             >
               {ticketsLoadingMore ? 'Carregando...' : 'Carregar mais tickets'}
             </button>
@@ -1053,7 +1287,7 @@ function TicketsPage() {
         )}
 
         {tickets.length === 0 && (
-          <div className="text-center py-20 bg-muted/20 rounded-3xl border-2 border-dashed">
+          <div className="text-center py-20 bg-card/40 rounded-3xl border-2 border-dashed border-border/80">
             <Search size={48} className="mx-auto mb-4 opacity-20"/>
             <p className="text-muted-foreground font-medium">Nenhum ticket encontrado com os filtros atuais.</p>
           </div>
@@ -1071,10 +1305,10 @@ function TicketsPage() {
 
 function MetricCard({ title, value, subtitle, icon }: { title: string; value: string | number; subtitle?: string; icon: React.ReactNode }) {
   return (
-    <div className="bg-card border rounded-2xl p-5 shadow-sm">
+    <div className="ui-surface-soft p-5">
       <div className="flex items-center justify-between">
         <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
-        <div className="text-primary">{icon}</div>
+        <div className="h-9 w-9 rounded-xl bg-primary/14 text-primary flex items-center justify-center border border-primary/25">{icon}</div>
       </div>
       <div className="mt-4 text-3xl font-black tracking-tight">{value}</div>
       {subtitle && <p className="text-xs text-muted-foreground mt-2">{subtitle}</p>}
@@ -1163,9 +1397,9 @@ function DashboardPage() {
 
   if (error) {
     return (
-      <div className="bg-card border rounded-2xl p-6 flex items-center justify-between">
+      <div className="ui-surface p-6 flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{error}</p>
-        <button onClick={loadDashboard} className="px-4 py-2 text-xs font-bold uppercase tracking-widest rounded-lg border hover:bg-muted">
+        <button onClick={loadDashboard} className="ui-btn-secondary px-4 py-2 text-xs uppercase tracking-widest">
           Tentar novamente
         </button>
       </div>
@@ -1187,7 +1421,7 @@ function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="bg-card border rounded-2xl p-5 xl:col-span-2">
+        <div className="ui-surface-soft p-5 xl:col-span-2">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold">Distribuição por status</h3>
             <button onClick={() => navigate('/tickets')} className="text-xs font-bold text-primary hover:underline">
@@ -1202,7 +1436,7 @@ function DashboardPage() {
                   <span className="text-muted-foreground">{s.count} ({s.percent}%)</span>
                 </div>
                 <div className="h-2 rounded-full bg-muted/50 overflow-hidden">
-                  <div className="h-full bg-primary" style={{ width: `${s.percent}%` }} />
+                  <div className="h-full bg-gradient-to-r from-primary/70 via-primary to-primary" style={{ width: `${s.percent}%` }} />
                 </div>
               </div>
             ))}
@@ -1212,7 +1446,7 @@ function DashboardPage() {
           </div>
         </div>
 
-        <div className="bg-card border rounded-2xl p-5">
+        <div className="ui-surface-soft p-5">
           <h3 className="text-lg font-bold mb-4">Fila pessoal</h3>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -1227,7 +1461,7 @@ function DashboardPage() {
               <p className="text-sm text-muted-foreground">Em revisão</p>
               <p className="text-xl font-black">{inReviewCount}</p>
             </div>
-            <button onClick={() => navigate('/tickets')} className="w-full py-3 text-xs font-bold uppercase tracking-widest rounded-xl border hover:bg-muted">
+            <button onClick={() => navigate('/tickets')} className="ui-btn-secondary w-full py-3 text-xs uppercase tracking-widest">
               Ir para tickets
             </button>
           </div>
@@ -1235,7 +1469,7 @@ function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="bg-card border rounded-2xl p-5">
+        <div className="ui-surface-soft p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold">Tickets recentes</h3>
             <button onClick={() => navigate('/tickets')} className="text-xs font-bold text-primary hover:underline">
@@ -1244,7 +1478,7 @@ function DashboardPage() {
           </div>
           <div className="space-y-3">
             {recentTickets.map(t => (
-              <div key={t.id} className="flex items-center justify-between gap-3 p-3 rounded-xl hover:bg-muted/40 transition-colors">
+              <div key={t.id} className="flex items-center justify-between gap-3 p-3 rounded-xl hover:bg-muted/55 transition-colors">
                 <div>
                   <p className="text-sm font-semibold line-clamp-1">{t.title}</p>
                   <p className="text-[11px] text-muted-foreground">#{t.id} • {t.solicitor_sector_name} → {t.executor_sector_name || 'Não atribuído'}</p>
@@ -1260,7 +1494,7 @@ function DashboardPage() {
           </div>
         </div>
 
-        <div className="bg-card border rounded-2xl p-5">
+        <div className="ui-surface-soft p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold">Notificações recentes</h3>
             <button onClick={() => navigate('/tickets')} className="text-xs font-bold text-primary hover:underline">
@@ -1269,7 +1503,7 @@ function DashboardPage() {
           </div>
           <div className="space-y-3">
             {recentNotifications.map(n => (
-              <div key={n.id} className="p-3 rounded-xl border bg-muted/20 text-xs">
+              <div key={n.id} className="p-3 rounded-xl border border-border/70 bg-muted/25 text-xs">
                 <p className="font-medium">{n.content}</p>
                 <p className="text-[10px] text-muted-foreground mt-1">{new Date(n.created_at).toLocaleString()}</p>
               </div>
@@ -1299,10 +1533,17 @@ function AdminPage() {
 function AppShell() {
   const { user, logout } = useAuth();
   const location = useLocation();
-  const [theme, setTheme] = useState<'light' | 'dark'>(user?.theme || 'light');
+  const themeStorageKey = getThemeStorageKey(user?.id);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const persisted = localStorage.getItem(themeStorageKey);
+    if (isThemeValue(persisted)) return persisted;
+    return user?.theme || 'light';
+  });
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showTenantModal, setShowTenantModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showNotificationsPanel, setShowNotificationsPanel] = useState(false);
+  const notificationsPanelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (user && user.role === 'admin' && user.tenant_name?.startsWith('Empresa de ')) {
@@ -1342,7 +1583,35 @@ function AppShell() {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
-  }, [theme]);
+    localStorage.setItem(themeStorageKey, theme);
+  }, [theme, themeStorageKey]);
+
+  useEffect(() => {
+    const persisted = localStorage.getItem(themeStorageKey);
+    if (isThemeValue(persisted)) {
+      setTheme(persisted);
+      return;
+    }
+    setTheme(user?.theme || 'light');
+  }, [themeStorageKey, user?.theme]);
+
+  useEffect(() => {
+    setSidebarOpen(false);
+    setShowNotificationsPanel(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const onClickOutside = (event: MouseEvent) => {
+      const panel = notificationsPanelRef.current;
+      if (!panel) return;
+      if (event.target instanceof Node && !panel.contains(event.target)) {
+        setShowNotificationsPanel(false);
+      }
+    };
+
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
 
   const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
 
@@ -1363,12 +1632,14 @@ function AppShell() {
       : 'Dashboard';
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
-      isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+    `relative flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+      isActive
+        ? 'bg-primary/14 text-primary border border-primary/20 shadow-[0_10px_20px_-18px_rgba(var(--primary-rgb),0.8)]'
+        : 'text-muted-foreground hover:text-foreground hover:bg-muted/45 border border-transparent'
     }`;
 
   return (
-    <div className="h-screen bg-background text-foreground flex overflow-hidden">
+    <div className="h-screen text-foreground flex overflow-hidden">
       {showTenantModal && user && (
         <TenantNameModal 
           tenantId={user.tenant_id} 
@@ -1382,11 +1653,12 @@ function AppShell() {
         onClick={() => setSidebarOpen(false)}
       />
 
-      <aside className={`fixed inset-y-0 left-0 z-50 w-72 h-screen bg-card border-r p-6 flex flex-col gap-8 transition-transform md:static md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 h-screen bg-card/88 backdrop-blur-xl border-r border-border/75 p-6 flex flex-col gap-8 transition-transform md:static md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs uppercase tracking-widest text-muted-foreground">Gestão 360</p>
-            <p className="text-lg font-black tracking-tight">{user?.tenant_name || 'Seu Tenant'}</p>
+            <p className="text-xl font-black tracking-tight mt-1">{user?.tenant_name || 'Seu Tenant'}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">Operação intersetorial em tempo real</p>
           </div>
           <button className="md:hidden p-2 hover:bg-muted rounded-full" onClick={() => setSidebarOpen(false)}>
             <X size={18} />
@@ -1411,11 +1683,11 @@ function AppShell() {
         </nav>
 
         <div className="mt-auto space-y-3">
-          <button onClick={toggleTheme} className="w-full flex items-center justify-between px-3 py-2 rounded-xl border bg-muted/30 hover:bg-muted transition-colors text-sm font-semibold">
+          <button onClick={toggleTheme} className="ui-btn-secondary w-full flex items-center justify-between px-3 py-2 text-sm font-semibold">
             <span>Tema</span>
             {theme === 'light' ? <Sun size={18}/> : <Moon size={18}/>}
           </button>
-          <button onClick={logout} className="w-full flex items-center justify-between px-3 py-2 rounded-xl border hover:bg-destructive/10 hover:text-destructive transition-colors text-sm font-semibold">
+          <button onClick={logout} className="ui-btn-secondary w-full flex items-center justify-between px-3 py-2 text-sm font-semibold hover:bg-destructive/10 hover:text-destructive">
             <span>Sair</span>
             <LogOut size={18} />
           </button>
@@ -1423,33 +1695,45 @@ function AppShell() {
       </aside>
 
       <div className="flex-1 flex flex-col h-screen">
-        <header className="sticky top-0 z-30 w-full border-b bg-background/80 backdrop-blur-md">
+        <header className="sticky top-0 z-30 w-full border-b border-border/70 bg-background/70 backdrop-blur-xl">
           <div className="px-6 lg:px-8 h-16 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button className="md:hidden p-2 hover:bg-muted rounded-full" onClick={() => setSidebarOpen(true)}>
                 <Menu size={20} />
               </button>
               <div>
+                <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Painel</p>
                 <p className="text-lg font-bold tracking-tight">{pageTitle}</p>
               </div>
             </div>
 
             <div className="flex items-center gap-4">
-              <div className="relative group">
-                <button className="p-2 hover:bg-muted rounded-full transition-colors relative">
-                  <Bell size={20}/>
-                  {unreadCount > 0 && <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full"/>}
+              <div ref={notificationsPanelRef} className="relative">
+                <button
+                  onClick={() => setShowNotificationsPanel(prev => !prev)}
+                  className="p-2.5 hover:bg-muted rounded-xl transition-colors relative border border-transparent hover:border-border/65"
+                >
+                  <Bell size={19}/>
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-destructive text-destructive-foreground flex items-center justify-center">
+                      {Math.min(unreadCount, 9)}
+                    </span>
+                  )}
                 </button>
-                <div className="absolute right-0 top-full mt-2 w-80 bg-card border rounded-2xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
+                <div className={`absolute right-0 top-full mt-2 w-80 bg-card/98 border border-border/75 rounded-2xl shadow-2xl transition-all z-50 overflow-hidden ${
+                  showNotificationsPanel ? 'opacity-100 visible translate-y-0' : 'opacity-0 invisible -translate-y-1'
+                }`}>
                   <div className="p-4 border-b bg-muted/30 font-bold text-sm">Notificações</div>
                   <div className="max-h-96 overflow-y-auto">
                     {sortedNotifications.length === 0 ? (
                       <div className="p-8 text-center text-sm text-muted-foreground">Nenhuma notificação nova</div>
                     ) : (
                       sortedNotifications.map(n => (
-                        <div key={n.id} className="p-4 border-b hover:bg-muted/50 transition-colors flex justify-between items-start gap-2">
+                        <div key={n.id} className="p-4 border-b border-border/60 hover:bg-muted/50 transition-colors flex justify-between items-start gap-2">
                           <p className="text-xs">{n.content}</p>
-                          <button onClick={() => markAsRead(n.id)} className="text-[10px] font-bold text-primary hover:underline">Lido</button>
+                          <button onClick={() => markAsRead(n.id)} className="text-[10px] font-bold text-primary hover:underline">
+                            Lido
+                          </button>
                         </div>
                       ))
                     )}
@@ -1457,18 +1741,21 @@ function AppShell() {
                 </div>
               </div>
 
-              <div className="hidden md:flex items-center gap-3 pl-4 border-l">
+              <div className="hidden md:flex items-center gap-3 pl-4 border-l border-border/70">
                 <div className="text-right">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{user?.name}</p>
                   <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{user?.sector_name}</p>
                 </div>
-                <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center font-bold">{user?.name?.[0]}</div>
+                <div className="w-9 h-9 rounded-full bg-primary/12 text-primary border border-primary/25 flex items-center justify-center font-bold">{user?.name?.[0]}</div>
               </div>
             </div>
           </div>
         </header>
 
-        <main className="flex-1 px-6 py-6 lg:px-8 overflow-y-auto">
-          <Outlet context={{ notifications, markAsRead }} />
+        <main className="flex-1 px-4 py-5 lg:px-8 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[1200px]">
+            <Outlet context={{ notifications, markAsRead }} />
+          </div>
         </main>
       </div>
     </div>
@@ -1516,5 +1803,5 @@ function AppContent() {
     </div>
   );
 
-  return user ? <AuthenticatedApp /> : <Login />;
+  return user ? <AuthenticatedApp /> : <PublicExperience />;
 }
