@@ -144,13 +144,29 @@ async function notifyTicketParticipants(params: {
   );
 
   try {
-    await supabase.functions.invoke('send-ticket-notification-email', {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+    if (sessionError || !accessToken) {
+      console.error('Failed to trigger ticket notification email: missing authenticated session.', {
+        sessionError,
+      });
+      return;
+    }
+
+    const { data, error } = await supabase.functions.invoke('send-ticket-notification-email', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
       body: {
         ticket_id: ticketId,
         content,
         actor_user_id: actorUserId ?? null,
       },
     });
+
+    if (error || (data as JsonMap | null)?.error) {
+      console.error('Failed to trigger ticket notification email:', error || (data as JsonMap).error);
+    }
   } catch (error) {
     console.error('Failed to trigger ticket notification email:', error);
   }
@@ -764,13 +780,70 @@ async function handleAdminCreateUser(init?: RequestInit): Promise<Response> {
     return errorResponse('Acesso negado: Voce nao tem permissao de administrador.', 403);
   }
 
+  const tenantId = toNumber(tenant_id);
+  const sectorId = toNumber(sector_id);
+  const adminId = toNumber(admin_id);
+  const cleanName = typeof name === 'string' ? name.trim() : '';
+  const cleanEmail = typeof email === 'string' ? normalizeEmail(email) : '';
+  const cleanRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
+
+  if (!tenantId || !sectorId || !adminId || !cleanName || !cleanEmail) {
+    return errorResponse('Dados obrigatorios ausentes para convidar usuario.', 400);
+  }
+
+  if (cleanRole !== 'admin' && cleanRole !== 'user') {
+    return errorResponse('Role invalida para convite de usuario.', 400);
+  }
+
   const { data: result, error } = await supabase
     .from('users')
-    .insert({ tenant_id, sector_id, name, email, role })
+    .insert({ tenant_id: tenantId, sector_id: sectorId, name: cleanName, email: cleanEmail, role: cleanRole })
     .select()
     .single();
 
   if (error) return errorResponse(error.message, 400);
+
+  try {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+    if (sessionError || !accessToken) {
+      await supabase.from('users').delete().eq('id', result.id);
+      return errorResponse(
+        'Sessao autenticada nao encontrada para envio do convite por e-mail. O usuario nao foi criado.',
+        401,
+      );
+    }
+
+    const { data: inviteResult, error: inviteError } = await supabase.functions.invoke(
+      'send-user-invitation-email',
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: {
+          invited_user_id: result.id,
+          invited_user_name: cleanName,
+          invited_user_email: cleanEmail,
+          tenant_id: tenantId,
+          sector_id: sectorId,
+          role: cleanRole,
+          admin_user_id: adminId,
+        },
+      },
+    );
+
+    if (inviteError || inviteResult?.error) {
+      await supabase.from('users').delete().eq('id', result.id);
+      return errorResponse(
+        inviteResult?.error || 'Nao foi possivel enviar o e-mail de convite. O usuario nao foi criado.',
+        502,
+      );
+    }
+  } catch (inviteUnhandledError) {
+    await supabase.from('users').delete().eq('id', result.id);
+    return errorResponse('Nao foi possivel enviar o e-mail de convite. O usuario nao foi criado.', 502);
+  }
+
   return jsonResponse(result);
 }
 

@@ -16,6 +16,7 @@ Gestão 360 is a platform designed to manage and streamline communication and ta
    - The status filter in the tickets list must support selecting multiple statuses at once, and the default queue should start with Aberto + Em Atendimento selected.
    - The tickets screen must support both card view and Kanban view, and Kanban must allow status manipulation using the existing linear progression rules.
 3. **Admin Panel**: Management of sectors and users within a tenant.
+   - User invitations created in the admin panel must trigger an invitation email to the invited user.
 4. **Notifications**: Real-time or polled notifications for ticket updates and mentions, via app and e-mail.
 5. **Storage**: File attachment support for tickets and comments.
 6. **Dashboard & Navigation**: Home dashboard with key ticket metrics (by status, pending, recent, notifications) and sidebar navigation (Dashboard, Tickets, Admin for admins).

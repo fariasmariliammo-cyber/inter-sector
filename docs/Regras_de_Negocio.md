@@ -19,6 +19,7 @@
 ## 4. Administração
 
 - Apenas usuários com a role `admin` podem acessar o `AdminPanel`.
+- Convites de novos usuarios feitos no `AdminPanel` devem enviar e-mail de convite para o usuario convidado.
 - Setores com usuários ou tickets vinculados não podem ser excluídos.
 - Usuários com tickets ou comentários vinculados não podem ser excluídos.
 
