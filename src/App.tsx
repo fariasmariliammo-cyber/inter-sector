@@ -5,7 +5,7 @@ import { Ticket, Sector, User, Status, Comment, Notification } from './types';
 import { 
   Plus, Search, Bell, User as UserIcon, LogOut, 
   MessageSquare, ChevronRight, Moon, Sun,
-  CheckCircle2, Clock, AlertCircle, Send, X, Shield, Settings, Mail, Lock, Paperclip, FileText, Download, Edit,
+  AlertCircle, Send, X, Shield, Settings, Mail, Lock, Paperclip, FileText, Download, Edit,
   BarChart3, LayoutGrid, Menu, ArrowLeft, Zap, Users as UsersIcon, Sparkles, Building2, Filter
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -34,6 +34,47 @@ type TicketFilters = {
   search: string;
 };
 type TicketsViewMode = 'cards' | 'kanban';
+type DashboardPeriod = '30d' | '3m' | '6m' | '1y';
+type DashboardSectorMetricBase = {
+  sectorId: number | null;
+  name: string;
+  total: number;
+  done: number;
+  pending: number;
+};
+type DashboardSectorMetric = DashboardSectorMetricBase & { completionRate: number };
+
+const dashboardPeriodOptions: Array<{ value: DashboardPeriod; label: string }> = [
+  { value: '30d', label: 'Ultimos 30 dias' },
+  { value: '3m', label: 'Ultimos 3 meses' },
+  { value: '6m', label: 'Ultimos 6 meses' },
+  { value: '1y', label: 'Ultimo ano' },
+];
+
+const DASHBOARD_FALLBACK_CHART_COLORS = ['#2563eb', '#0ea5e9', '#14b8a6', '#f97316', '#84cc16'];
+
+const getDashboardStatusColor = (statusName: string, index: number) => {
+  const normalizedName = statusName
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (normalizedName.includes('abert')) return '#ef4444';
+  if (normalizedName.includes('andamento') || normalizedName.includes('atend')) return '#f59e0b';
+  if (normalizedName.includes('conclu')) return '#16a34a';
+
+  return DASHBOARD_FALLBACK_CHART_COLORS[index % DASHBOARD_FALLBACK_CHART_COLORS.length];
+};
+
+const getDashboardStatusStyle = (statusName: string, index = 0) => {
+  const color = getDashboardStatusColor(statusName, index);
+
+  return {
+    color,
+    borderColor: `${color}55`,
+    backgroundColor: `${color}1a`,
+  };
+};
 
 const isThemeValue = (value: string | null): value is 'light' | 'dark' =>
   value === 'light' || value === 'dark';
@@ -62,6 +103,29 @@ const getPeriodEndIso = () => {
   const end = new Date();
   end.setHours(23, 59, 59, 999);
   return end.toISOString();
+};
+
+const getDashboardPeriodStartIso = (period: DashboardPeriod) => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+
+  if (period === '30d') {
+    start.setDate(start.getDate() - 30);
+    return start.toISOString();
+  }
+
+  if (period === '3m') {
+    start.setMonth(start.getMonth() - 3);
+    return start.toISOString();
+  }
+
+  if (period === '6m') {
+    start.setMonth(start.getMonth() - 6);
+    return start.toISOString();
+  }
+
+  start.setFullYear(start.getFullYear() - 1);
+  return start.toISOString();
 };
 
 const fetchWithRetry = async (url: string, options?: RequestInit, retries = 3): Promise<any> => {
@@ -1185,7 +1249,9 @@ function TicketSummaryCard({
         </div>
       )}
 
-      <div className="mb-2 break-words text-[10px] font-mono text-muted-foreground">#{ticket.id} • {new Date(ticket.created_at).toLocaleDateString()}</div>
+      <div className="mb-2 break-words text-[10px] font-mono text-muted-foreground">
+        #{ticket.id} • {new Date(ticket.created_at).toLocaleDateString()} • {new Date(ticket.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      </div>
       <h3 className={`font-bold mb-4 line-clamp-2 group-hover:text-primary transition-colors ${embedded ? 'text-base' : 'text-lg'}`}>{ticket.title}</h3>
 
       <div className="space-y-3">
@@ -1225,14 +1291,20 @@ function TicketsPage() {
   const [showNewTicket, setShowNewTicket] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
   const [showStatusFilter, setShowStatusFilter] = useState(false);
+  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [viewMode, setViewMode] = useState<TicketsViewMode>(() => {
     const storedView = localStorage.getItem(TICKETS_VIEW_STORAGE_KEY);
     return storedView === 'cards' ? 'cards' : 'kanban';
+  });
+  const [isMobileView, setIsMobileView] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(max-width: 767px)').matches;
   });
   const [draggedTicketId, setDraggedTicketId] = useState<number | null>(null);
   const [dragOverStatusId, setDragOverStatusId] = useState<number | null>(null);
   const [updatingTicketId, setUpdatingTicketId] = useState<number | null>(null);
   const statusFilterRef = useRef<HTMLDivElement | null>(null);
+  const filtersPanelRef = useRef<HTMLDivElement | null>(null);
   const periodOptions = [
     { value: '1', label: 'Ultimo mes' },
     { value: '3', label: 'Ultimos 3 meses' },
@@ -1260,15 +1332,36 @@ function TicketsPage() {
     .filter((status) => filters.status_ids.includes(String(status.id)))
     .sort((a, b) => a.sequence - b.sequence)
     .map((status) => status.name);
+  const selectedPeriodLabel = periodOptions.find((item) => item.value === filters.period_months)?.label || 'Todo o periodo';
+  const selectedSolicitorLabel = filters.sector_solicitor
+    ? sectors.find((sector) => String(sector.id) === filters.sector_solicitor)?.name || 'Setor selecionado'
+    : 'Todos solicitantes';
+  const selectedExecutorLabel = filters.sector_executor
+    ? sectors.find((sector) => String(sector.id) === filters.sector_executor)?.name || 'Setor selecionado'
+    : 'Todos executores';
+  const statusSummaryLabel = selectedStatusLabels.length > 0 ? selectedStatusLabels.join(' + ') : 'Todos os status';
+  const activeFiltersCount =
+    Number(filters.period_months !== defaultFilters.period_months) +
+    Number(filters.sector_solicitor !== defaultFilters.sector_solicitor) +
+    Number(filters.sector_executor !== defaultFilters.sector_executor) +
+    Number(filters.search.trim() !== '') +
+    Number(filters.status_ids.join(',') !== defaultFilters.status_ids.join(','));
+  const effectiveViewMode: TicketsViewMode = isMobileView ? 'cards' : viewMode;
   const visibleStatuses = [...statuses].sort((a, b) => a.sequence - b.sequence);
   const draggedTicket = tickets.find((ticket) => ticket.id === draggedTicketId) || null;
 
   useEffect(() => {
     const onClickOutside = (event: MouseEvent) => {
-      const container = statusFilterRef.current;
-      if (!container) return;
-      if (event.target instanceof Node && !container.contains(event.target)) {
+      if (!(event.target instanceof Node)) return;
+
+      const statusContainer = statusFilterRef.current;
+      if (statusContainer && !statusContainer.contains(event.target)) {
         setShowStatusFilter(false);
+      }
+
+      const filtersContainer = filtersPanelRef.current;
+      if (filtersContainer && !filtersContainer.contains(event.target)) {
+        setShowFiltersPanel(false);
       }
     };
 
@@ -1279,6 +1372,22 @@ function TicketsPage() {
   useEffect(() => {
     localStorage.setItem(TICKETS_VIEW_STORAGE_KEY, viewMode);
   }, [viewMode]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(max-width: 767px)');
+    const applyViewportMode = () => setIsMobileView(mediaQuery.matches);
+    applyViewportMode();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', applyViewportMode);
+      return () => mediaQuery.removeEventListener('change', applyViewportMode);
+    }
+
+    mediaQuery.addListener(applyViewportMode);
+    return () => mediaQuery.removeListener(applyViewportMode);
+  }, []);
 
   useEffect(() => {
     setFilters((current) => {
@@ -1428,26 +1537,28 @@ function TicketsPage() {
             )}
           </div>
           <div className="flex w-full min-w-0 flex-col gap-3 md:w-auto md:flex-row md:items-center">
-            <div className="inline-grid w-full max-w-full grid-cols-2 overflow-hidden rounded-2xl border border-border/70 bg-card/65 p-1 backdrop-blur-sm md:w-auto">
-              <button
-                type="button"
-                onClick={() => setViewMode('cards')}
-                className={`w-full rounded-xl px-3 py-2 text-sm font-bold transition-colors sm:px-4 ${
-                  viewMode === 'cards' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Cards
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('kanban')}
-                className={`w-full rounded-xl px-3 py-2 text-sm font-bold transition-colors sm:px-4 ${
-                  viewMode === 'kanban' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Kanban
-              </button>
-            </div>
+            {!isMobileView && (
+              <div className="inline-grid w-full max-w-full grid-cols-2 overflow-hidden rounded-2xl border border-border/70 bg-card/65 p-1 backdrop-blur-sm md:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('cards')}
+                  className={`w-full rounded-xl px-3 py-2 text-sm font-bold transition-colors sm:px-4 ${
+                    viewMode === 'cards' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Cards
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('kanban')}
+                  className={`w-full rounded-xl px-3 py-2 text-sm font-bold transition-colors sm:px-4 ${
+                    viewMode === 'kanban' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Kanban
+                </button>
+              </div>
+            )}
             <button 
               onClick={() => setShowNewTicket(true)}
               className="ui-btn-primary flex w-full items-center justify-center gap-2 px-4 py-3 text-sm shadow-[0_20px_45px_-28px_rgba(var(--primary-rgb),0.72)] sm:px-6 md:w-auto"
@@ -1458,123 +1569,201 @@ function TicketsPage() {
           </div>
         </div>
 
-        {viewMode === 'kanban' && (
+        {effectiveViewMode === 'kanban' && (
           <div className="rounded-2xl border border-primary/15 bg-primary/8 px-4 py-3 text-sm text-muted-foreground break-words">
             Arraste o ticket para outra coluna para atualizar o status. As 3 colunas do fluxo ficam sempre visíveis; o filtro de status apenas decide quais tickets aparecem dentro de cada uma.
           </div>
         )}
 
-        <div className="ui-surface-soft grid min-w-0 grid-cols-1 gap-3 p-3 sm:p-4 md:grid-cols-6">
-          <select
-            className="ui-select text-sm md:col-span-2"
-            value={filters.period_months}
-            onChange={e => setFilters({...filters, period_months: e.target.value})}
-          >
-            {periodOptions.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-          <select
-            className="ui-select text-sm"
-            value={filters.sector_solicitor}
-            onChange={e => setFilters({...filters, sector_solicitor: e.target.value})}
-          >
-            <option value="">Setor Solicitante</option>
-            {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-          <select
-            className="ui-select text-sm"
-            value={filters.sector_executor}
-            onChange={e => setFilters({...filters, sector_executor: e.target.value})}
-          >
-            <option value="">Setor Executor</option>
-            {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-          <div ref={statusFilterRef} className="relative">
+        <div ref={filtersPanelRef} className="relative z-20">
+          <div className="ui-surface-soft flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:p-4">
             <button
               type="button"
-              onClick={() => setShowStatusFilter((prev) => !prev)}
-              className="ui-select flex w-full items-center justify-between gap-3 text-sm"
+              onClick={() => {
+                setShowFiltersPanel((current) => {
+                  const next = !current;
+                  if (!next) setShowStatusFilter(false);
+                  return next;
+                });
+              }}
+              className={`inline-flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm font-bold transition-colors sm:w-auto ${
+                showFiltersPanel
+                  ? 'border-primary/45 bg-primary/10 text-primary'
+                  : 'border-border/70 bg-background/70 text-foreground hover:bg-muted/55'
+              }`}
             >
-              <span className="flex min-w-0 items-center gap-2">
-                <Filter size={15} className="shrink-0 text-muted-foreground" />
-                <span className="truncate">
-                  {selectedStatusLabels.length > 0 ? selectedStatusLabels.join(' + ') : 'Todos os status'}
-                </span>
+              <span className="inline-flex items-center gap-2">
+                <Filter size={16} className="shrink-0" />
+                Filtros
+                {hasActiveFilters && (
+                  <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-primary-foreground">
+                    {activeFiltersCount}
+                  </span>
+                )}
               </span>
-              <ChevronRight size={16} className={`shrink-0 transition-transform ${showStatusFilter ? 'rotate-90' : ''}`} />
+              <ChevronRight size={16} className={`shrink-0 transition-transform ${showFiltersPanel ? 'rotate-90' : ''}`} />
             </button>
 
-            <AnimatePresence>
-              {showStatusFilter && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
-                  className="absolute left-0 top-full z-20 mt-2 w-full min-w-0 rounded-2xl border border-border/75 bg-card/98 p-2 shadow-2xl backdrop-blur-xl sm:min-w-[240px]"
-                >
-                  <div className="border-b border-border/70 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
-                    Status visiveis
-                  </div>
-                  <div className="max-h-64 overflow-y-auto py-2">
-                    {statuses
-                      .slice()
-                      .sort((a, b) => a.sequence - b.sequence)
-                      .map((status) => {
-                        const statusId = String(status.id);
-                        const checked = filters.status_ids.includes(statusId);
+            <div className="min-w-0 flex-1 rounded-2xl border border-border/60 bg-background/35 px-4 py-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Resumo dos filtros</p>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span className="truncate"><span className="font-semibold text-foreground">Periodo:</span> {selectedPeriodLabel}</span>
+                <span className="truncate"><span className="font-semibold text-foreground">Solicitante:</span> {selectedSolicitorLabel}</span>
+                <span className="truncate"><span className="font-semibold text-foreground">Executor:</span> {selectedExecutorLabel}</span>
+                <span className="truncate"><span className="font-semibold text-foreground">Status:</span> {statusSummaryLabel}</span>
+              </div>
+            </div>
 
-                        return (
-                          <label
-                            key={status.id}
-                            className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-muted/50"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                setFilters((current) => {
-                                  const nextStatusIds = checked
-                                    ? current.status_ids.filter((id) => id !== statusId)
-                                    : [...current.status_ids, statusId];
+            <button
+              type="button"
+              disabled={!hasActiveFilters}
+              onClick={() => setFilters(defaultFilters)}
+              className="ui-btn-secondary inline-flex w-full items-center justify-center px-4 py-3 text-xs uppercase tracking-[0.18em] disabled:opacity-45 sm:w-auto"
+            >
+              Limpar filtros
+            </button>
+          </div>
 
-                                  return {
-                                    ...current,
-                                    status_ids: statuses
-                                      .filter((item) => nextStatusIds.includes(String(item.id)))
-                                      .sort((a, b) => a.sequence - b.sequence)
-                                      .map((item) => String(item.id))
-                                  };
-                                });
-                              }}
-                              className="h-4 w-4 rounded border-border text-primary focus:ring-primary/25"
-                            />
-                            <span className="flex-1">{status.name}</span>
-                          </label>
-                        );
-                      })}
+          <AnimatePresence>
+            {showFiltersPanel && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                className="absolute left-0 right-0 top-full z-40 mt-3"
+              >
+                <div className="ui-surface overflow-visible border-border/70 p-4 sm:p-5">
+                  <div className="mb-4 border-b border-border/60 pb-3">
+                    <p className="text-xs font-black uppercase tracking-[0.22em] text-muted-foreground">Configurar Filtros</p>
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={filters.search}
-              onChange={e => setFilters({...filters, search: e.target.value})}
-              placeholder="Buscar por título ou #"
-              className="ui-input w-full text-sm py-3 pl-9 pr-3"
-            />
-          </div>
-          <button
-            type="button"
-            disabled={!hasActiveFilters}
-            onClick={() => setFilters(defaultFilters)}
-            className="ui-btn-secondary inline-flex h-auto w-full items-center justify-center text-center disabled:opacity-45 md:h-full"
-          >
-            Limpar filtros
-          </button>
+
+                  <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
+                    <div className="space-y-1.5 xl:col-span-2">
+                      <p className="px-1 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Periodo</p>
+                      <select
+                        className="ui-select text-sm"
+                        value={filters.period_months}
+                        onChange={e => setFilters({...filters, period_months: e.target.value})}
+                      >
+                        {periodOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5 xl:col-span-1">
+                      <p className="px-1 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Setor Solicitante</p>
+                      <select
+                        className="ui-select text-sm"
+                        value={filters.sector_solicitor}
+                        onChange={e => setFilters({...filters, sector_solicitor: e.target.value})}
+                      >
+                        <option value="">Setor Solicitante</option>
+                        {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5 xl:col-span-1">
+                      <p className="px-1 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Setor Executor</p>
+                      <select
+                        className="ui-select text-sm"
+                        value={filters.sector_executor}
+                        onChange={e => setFilters({...filters, sector_executor: e.target.value})}
+                      >
+                        <option value="">Setor Executor</option>
+                        {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5 xl:col-span-1">
+                      <p className="px-1 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Status</p>
+                      <div ref={statusFilterRef} className={`relative ${showStatusFilter ? 'z-50' : 'z-0'}`}>
+                        <button
+                          type="button"
+                          onClick={() => setShowStatusFilter((prev) => !prev)}
+                          className="ui-select flex w-full items-center justify-between gap-3 text-sm"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <Filter size={15} className="shrink-0 text-muted-foreground" />
+                            <span className="truncate">
+                              {selectedStatusLabels.length > 0 ? selectedStatusLabels.join(' + ') : 'Todos os status'}
+                            </span>
+                          </span>
+                          <ChevronRight size={16} className={`shrink-0 transition-transform ${showStatusFilter ? 'rotate-90' : ''}`} />
+                        </button>
+
+                        <AnimatePresence>
+                          {showStatusFilter && (
+                            <motion.div
+                              initial={{ opacity: 0, y: 8 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: 8 }}
+                              className="absolute left-0 top-full z-50 mt-2 w-full min-w-0 rounded-2xl border border-border/75 bg-card/98 p-2 shadow-2xl backdrop-blur-xl sm:min-w-[240px]"
+                            >
+                              <div className="border-b border-border/70 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
+                                Status visiveis
+                              </div>
+                              <div className="max-h-64 overflow-y-auto py-2">
+                                {statuses
+                                  .slice()
+                                  .sort((a, b) => a.sequence - b.sequence)
+                                  .map((status) => {
+                                    const statusId = String(status.id);
+                                    const checked = filters.status_ids.includes(statusId);
+
+                                    return (
+                                      <label
+                                        key={status.id}
+                                        className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-muted/50"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() => {
+                                            setFilters((current) => {
+                                              const nextStatusIds = checked
+                                                ? current.status_ids.filter((id) => id !== statusId)
+                                                : [...current.status_ids, statusId];
+
+                                              return {
+                                                ...current,
+                                                status_ids: statuses
+                                                  .filter((item) => nextStatusIds.includes(String(item.id)))
+                                                  .sort((a, b) => a.sequence - b.sequence)
+                                                  .map((item) => String(item.id))
+                                              };
+                                            });
+                                          }}
+                                          className="h-4 w-4 rounded border-border text-primary focus:ring-primary/25"
+                                        />
+                                        <span className="flex-1">{status.name}</span>
+                                      </label>
+                                    );
+                                  })}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 xl:col-span-1">
+                      <p className="px-1 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Busca</p>
+                      <div className="relative">
+                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                        <input
+                          value={filters.search}
+                          onChange={e => setFilters({...filters, search: e.target.value})}
+                          placeholder="Buscar por título ou #"
+                          className="ui-input w-full text-sm py-3 pl-9 pr-3"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Persistent Notifications Popups */}
@@ -1598,7 +1787,7 @@ function TicketsPage() {
           </AnimatePresence>
         </div>
 
-        {viewMode === 'cards' ? (
+        {effectiveViewMode === 'cards' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {tickets.map((ticket) => (
               <TicketSummaryCard
@@ -1730,27 +1919,18 @@ function TicketsPage() {
   );
 }
 
-function MetricCard({ title, value, subtitle, icon }: { title: string; value: string | number; subtitle?: string; icon: React.ReactNode }) {
-  return (
-    <div className="ui-surface-soft p-5">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
-        <div className="h-9 w-9 rounded-xl bg-primary/14 text-primary flex items-center justify-center border border-primary/25">{icon}</div>
-      </div>
-      <div className="mt-4 text-3xl font-black tracking-tight">{value}</div>
-      {subtitle && <p className="text-xs text-muted-foreground mt-2">{subtitle}</p>}
-    </div>
-  );
-}
-
 function DashboardPage() {
   const { user } = useAuth();
   const { notifications } = useOutletContext<AppShellContext>();
   const navigate = useNavigate();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [statuses, setStatuses] = useState<Status[]>([]);
+  const [sectors, setSectors] = useState<Sector[]>([]);
+  const [period, setPeriod] = useState<DashboardPeriod>('3m');
+  const [statusSectorFilter, setStatusSectorFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isAdminDashboard = user?.role === 'admin';
 
   const loadDashboard = async () => {
     if (!user) return;
@@ -1763,13 +1943,21 @@ function DashboardPage() {
       limit: String(METRICS_TICKETS_LIMIT),
       offset: '0'
     });
+    params.set('created_from', getDashboardPeriodStartIso(period));
+    params.set('created_to', getPeriodEndIso());
+    if (user.role !== 'admin' && user.sector_id) {
+      params.set('dashboard_scope', 'sector');
+      params.set('sector_executor', String(user.sector_id));
+    }
     try {
-      const [ticketsData, statusData] = await Promise.all([
+      const [ticketsData, statusData, sectorsData] = await Promise.all([
         fetchWithRetry(`/api/tickets?${params}`),
-        fetchWithRetry(`/api/statuses?tenant_id=${user.tenant_id}`)
+        fetchWithRetry(`/api/statuses?tenant_id=${user.tenant_id}`),
+        fetchWithRetry(`/api/sectors?tenant_id=${user.tenant_id}`)
       ]);
       setTickets(ticketsData || []);
       setStatuses(statusData || []);
+      setSectors(sectorsData || []);
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
       setError('Não foi possível carregar o dashboard.');
@@ -1780,33 +1968,95 @@ function DashboardPage() {
 
   useEffect(() => {
     loadDashboard();
-  }, [user]);
+  }, [user, period]);
+
+  useEffect(() => {
+    if (!isAdminDashboard) {
+      setStatusSectorFilter('all');
+      return;
+    }
+
+    setStatusSectorFilter((current) => {
+      if (current === 'all') return current;
+      const exists = sectors.some((sector) => String(sector.id) === current);
+      return exists ? current : 'all';
+    });
+  }, [isAdminDashboard, sectors]);
 
   const total = tickets.length;
-  const countsByStatusId = tickets.reduce<Record<number, number>>((acc, t) => {
+  const ticketsForStatusChart =
+    isAdminDashboard && statusSectorFilter !== 'all'
+      ? tickets.filter((ticket) => String(ticket.executor_sector_id) === statusSectorFilter)
+      : tickets;
+  const statusChartTotal = ticketsForStatusChart.length;
+  const countsByStatusId = ticketsForStatusChart.reduce<Record<number, number>>((acc, t) => {
     acc[t.status_id] = (acc[t.status_id] || 0) + 1;
     return acc;
   }, {});
   const doneStatusIds = statuses
     .filter((status) => status.name.toLowerCase().includes('conclu'))
     .map((status) => status.id);
-  const highestStatusSequence = statuses.reduce((max, status) => Math.max(max, status.sequence), 0);
-  const openCount = tickets.filter(t => t.status_sequence === 1).length;
-  const inProgressCount = tickets.filter(t => t.status_sequence === 2).length;
   const doneCount = tickets.filter((ticket) => doneStatusIds.includes(ticket.status_id)).length;
+  const pendingCount = total - doneCount;
   const withoutExecutor = tickets.filter(t => !t.executor_sector_id).length;
-  const myQueue = tickets.filter((ticket) => ticket.executor_id === user?.id && !doneStatusIds.includes(ticket.status_id)).length;
-  const sectorQueue = tickets.filter(
+  const mySectorQueue = tickets.filter(
     (ticket) => ticket.executor_sector_id === user?.sector_id && !doneStatusIds.includes(ticket.status_id)
   ).length;
 
   const statusBreakdown = [...statuses]
     .sort((a, b) => a.sequence - b.sequence)
-    .map(s => ({
-      ...s,
-      count: countsByStatusId[s.id] || 0,
-      percent: total ? Math.round(((countsByStatusId[s.id] || 0) / total) * 100) : 0
+    .map((status, index) => ({
+      ...status,
+      count: countsByStatusId[status.id] || 0,
+      percent: statusChartTotal ? Math.round(((countsByStatusId[status.id] || 0) / statusChartTotal) * 100) : 0,
+      color: getDashboardStatusColor(status.name, index),
     }));
+  const statusBreakdownWithTickets = statusBreakdown.filter((status) => status.count > 0);
+  const pieGradient = (() => {
+    if (statusBreakdownWithTickets.length === 0 || statusChartTotal === 0) {
+      return 'conic-gradient(hsl(var(--muted)) 0% 100%)';
+    }
+
+    let accumulated = 0;
+    const slices = statusBreakdownWithTickets.map((status) => {
+      const start = accumulated;
+      accumulated += (status.count / statusChartTotal) * 100;
+      return `${status.color} ${start.toFixed(2)}% ${accumulated.toFixed(2)}%`;
+    });
+
+    return `conic-gradient(${slices.join(', ')})`;
+  })();
+  const sectorMetricsMap = sectors.reduce<Record<string, DashboardSectorMetricBase>>(
+    (acc, sector) => {
+      acc[String(sector.id)] = { sectorId: sector.id, name: sector.name, total: 0, done: 0, pending: 0 };
+      return acc;
+    },
+    {},
+  );
+  for (const ticket of tickets) {
+    const key = ticket.executor_sector_id ? String(ticket.executor_sector_id) : 'unassigned';
+    if (!sectorMetricsMap[key]) {
+      sectorMetricsMap[key] = { sectorId: null, name: ticket.executor_sector_name || 'Sem setor executor', total: 0, done: 0, pending: 0 };
+    }
+    sectorMetricsMap[key].total += 1;
+    if (doneStatusIds.includes(ticket.status_id)) sectorMetricsMap[key].done += 1;
+    else sectorMetricsMap[key].pending += 1;
+  }
+  const sectorPerformance: DashboardSectorMetric[] = (Object.values(sectorMetricsMap) as DashboardSectorMetricBase[])
+    .map((metric) => ({
+      ...metric,
+      completionRate: metric.total ? Math.round((metric.done / metric.total) * 100) : 0,
+    }))
+    .sort((a, b) => (b.completionRate - a.completionRate) || (b.total - a.total) || a.name.localeCompare(b.name));
+  const sectorsWithTickets = sectorPerformance.filter((sector) => sector.total > 0);
+  const bestSector = sectorsWithTickets[0] || null;
+  const worstCandidates = bestSector
+    ? sectorsWithTickets.filter((sector) => sector.sectorId !== bestSector.sectorId)
+    : sectorsWithTickets;
+  const worstSector = [...worstCandidates]
+    .sort((a, b) => (a.completionRate - b.completionRate) || (b.pending - a.pending) || a.name.localeCompare(b.name))[0] || null;
+  const highestBacklogSector = [...sectorsWithTickets]
+    .sort((a, b) => (b.pending - a.pending) || (a.completionRate - b.completionRate) || a.name.localeCompare(b.name))[0] || null;
 
   const recentTickets = [...tickets]
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -1815,6 +2065,15 @@ function DashboardPage() {
   const recentNotifications = [...notifications]
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 6);
+  const selectedPeriodLabel =
+    dashboardPeriodOptions.find((option) => option.value === period)?.label || 'Ultimos 3 meses';
+  const selectedStatusSectorLabel =
+    statusSectorFilter === 'all'
+      ? 'Todos os setores'
+      : sectors.find((sector) => String(sector.id) === statusSectorFilter)?.name || 'Setor';
+  const dashboardDescription = isAdminDashboard
+    ? `Saúde de todos os setores da ${user?.tenant_name} no período de ${selectedPeriodLabel.toLowerCase()}.`
+    : `Saúde do setor ${user?.sector_name} no período de ${selectedPeriodLabel.toLowerCase()}.`;
 
   if (loading) {
     return (
@@ -1841,65 +2100,193 @@ function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
-        <p className="text-muted-foreground">Visão geral das operações de tickets da {user?.tenant_name}</p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <MetricCard title="Total de tickets" value={total} subtitle={`Últimos ${Math.min(total, METRICS_TICKETS_LIMIT)} carregados`} icon={<LayoutGrid size={18} />} />
-        <MetricCard title="Em aberto" value={openCount} subtitle="Aguardando início" icon={<Clock size={18} />} />
-        <MetricCard title="Em andamento" value={inProgressCount} subtitle="Em atendimento" icon={<AlertCircle size={18} />} />
-        <MetricCard title="Concluídos" value={doneCount} subtitle={`Etapa final (${highestStatusSequence || 3})`} icon={<CheckCircle2 size={18} />} />
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
+          <p className="text-muted-foreground">{dashboardDescription}</p>
+        </div>
+        <div className="w-full max-w-xs space-y-1.5">
+          <p className="px-1 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Periodo</p>
+          <select
+            className="ui-select text-sm"
+            value={period}
+            onChange={(event) => setPeriod(event.target.value as DashboardPeriod)}
+          >
+            {dashboardPeriodOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="ui-surface-soft p-5 xl:col-span-2">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold">Distribuição por status</h3>
+            <div>
+              <h3 className="text-lg font-bold">Distribuição por status</h3>
+              <p className="text-xs text-muted-foreground">
+                {selectedPeriodLabel}
+                {isAdminDashboard ? ` • ${selectedStatusSectorLabel}` : ''}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {isAdminDashboard && (
+                <select
+                  className="ui-select max-w-[200px] text-xs"
+                  value={statusSectorFilter}
+                  onChange={(event) => setStatusSectorFilter(event.target.value)}
+                >
+                  <option value="all">Todos os setores</option>
+                  {sectors
+                    .slice()
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((sector) => (
+                      <option key={sector.id} value={String(sector.id)}>
+                        {sector.name}
+                      </option>
+                    ))}
+                </select>
+              )}
+              <button onClick={() => navigate('/tickets')} className="text-xs font-bold text-primary hover:underline">
+                Ver tickets
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:items-center">
+            <div className="mx-auto flex min-h-[260px] w-full items-center justify-center lg:min-h-[320px]">
+              <div className="relative h-56 w-56 rounded-full border border-border/70" style={{ background: pieGradient }}>
+                <div className="absolute inset-[18%] flex flex-col items-center justify-center rounded-full border border-border/70 bg-card/95 text-center">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Total</p>
+                  <p className="mt-1 text-3xl font-black">{statusChartTotal}</p>
+                  <p className="mt-1 text-[10px] text-muted-foreground">{selectedPeriodLabel}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex min-h-[260px] w-full items-center lg:min-h-[320px]">
+              <div className="w-full space-y-2">
+              {statusBreakdown.map((status) => (
+                <div key={status.id} className="flex items-center justify-between rounded-xl border border-border/70 bg-background/45 px-3 py-2 text-xs">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: status.color }} />
+                    <span className="truncate font-semibold" style={{ color: status.color }}>{status.name}</span>
+                  </div>
+                  <span style={{ color: status.color }}>{status.count} ({status.percent}%)</span>
+                </div>
+              ))}
+              {statusBreakdown.length === 0 && (
+                <div className="text-sm text-muted-foreground">Nenhum status configurado.</div>
+              )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="ui-surface-soft overflow-hidden p-0">
+          {isAdminDashboard ? (
+            <>
+              <div className="border-b border-border/70 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Admin</p>
+                <h3 className="mt-1 text-xl font-black tracking-tight">Resumo executivo</h3>
+                <p className="mt-1 text-xs text-muted-foreground">Panorama rápido de performance entre setores.</p>
+              </div>
+
+              <div className="space-y-2 p-4">
+                <div className="grid grid-cols-1 gap-2">
+                  <div className="rounded-2xl border border-emerald-500/45 bg-white/90 px-4 py-2 dark:bg-emerald-500/10">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-800 dark:text-emerald-300">Melhor setor</p>
+                    <p className="mt-1 text-base font-black text-foreground">
+                      {bestSector ? `${bestSector.name} (${bestSector.completionRate}%)` : 'Sem dados'}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-red-500/45 bg-white/90 px-4 py-2 dark:bg-red-500/10">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-red-800 dark:text-red-300">Pior setor</p>
+                    <p className="mt-1 text-base font-black text-foreground">
+                      {worstSector ? `${worstSector.name} (${worstSector.completionRate}%)` : 'Sem dados'}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-amber-500/45 bg-white/90 px-4 py-2 dark:bg-amber-500/10">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-800 dark:text-amber-300">Maior fila</p>
+                    <p className="mt-1 text-base font-black text-foreground">
+                      {highestBacklogSector ? `${highestBacklogSector.name} (${highestBacklogSector.pending})` : 'Sem dados'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border/70 bg-background/45 px-3 py-2 text-xs text-muted-foreground">
+                  Ranking baseado em percentual de conclusão e volume de pendências por setor.
+                </div>
+
+                <button onClick={() => navigate('/tickets')} className="ui-btn-secondary w-full py-3 text-xs uppercase tracking-widest">
+                  Ir para tickets
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="space-y-4 p-5">
+              <h3 className="text-lg font-bold">Saúde do meu setor</h3>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">Tickets do setor</p>
+                <p className="text-xl font-black">{total}</p>
+              </div>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">Pendentes</p>
+                <p className="text-xl font-black">{pendingCount}</p>
+              </div>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">Concluídos</p>
+                <p className="text-xl font-black">{doneCount}</p>
+              </div>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">Sem executor</p>
+                <p className="text-xl font-black">{withoutExecutor}</p>
+              </div>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">Fila ativa do meu setor</p>
+                <p className="text-xl font-black">{mySectorQueue}</p>
+              </div>
+              <button onClick={() => navigate('/tickets')} className="ui-btn-secondary w-full py-3 text-xs uppercase tracking-widest">
+                Ir para tickets
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {isAdminDashboard && (
+        <div className="ui-surface-soft p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold">Performance por setor</h3>
+              <p className="text-xs text-muted-foreground">Comparativo de eficiência e fila entre setores da empresa.</p>
+            </div>
             <button onClick={() => navigate('/tickets')} className="text-xs font-bold text-primary hover:underline">
               Ver tickets
             </button>
           </div>
-          <div className="space-y-3">
-            {statusBreakdown.map(s => (
-              <div key={s.id} className="space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold">{s.name}</span>
-                  <span className="text-muted-foreground">{s.count} ({s.percent}%)</span>
+          <div className="space-y-2">
+            {sectorPerformance.map((sector) => {
+              const tone = sector.completionRate >= 60 ? 'text-emerald-600' : sector.completionRate >= 30 ? 'text-amber-600' : 'text-red-600';
+
+              return (
+                <div key={`${sector.sectorId ?? 'unassigned'}-${sector.name}`} className="grid grid-cols-[minmax(0,1fr)_80px_80px_90px] items-center gap-3 rounded-xl border border-border/70 bg-background/45 px-3 py-2 text-xs">
+                  <p className="truncate font-semibold">{sector.name}</p>
+                  <p className="text-right text-muted-foreground">{sector.total} total</p>
+                  <p className="text-right text-muted-foreground">{sector.pending} pend.</p>
+                  <p className={`text-right font-bold ${tone}`}>{sector.completionRate}% concl.</p>
                 </div>
-                <div className="h-2 rounded-full bg-muted/50 overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-primary/70 via-primary to-primary" style={{ width: `${s.percent}%` }} />
-                </div>
-              </div>
-            ))}
-            {statusBreakdown.length === 0 && (
-              <div className="text-sm text-muted-foreground">Nenhum status configurado.</div>
+              );
+            })}
+            {sectorPerformance.length === 0 && (
+              <div className="text-sm text-muted-foreground">Nenhum setor encontrado.</div>
             )}
           </div>
         </div>
-
-        <div className="ui-surface-soft p-5">
-          <h3 className="text-lg font-bold mb-4">Fila pessoal</h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">Tickets comigo</p>
-              <p className="text-xl font-black">{myQueue}</p>
-            </div>
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">Sem executor</p>
-              <p className="text-xl font-black">{withoutExecutor}</p>
-            </div>
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">Na fila do meu setor</p>
-              <p className="text-xl font-black">{sectorQueue}</p>
-            </div>
-            <button onClick={() => navigate('/tickets')} className="ui-btn-secondary w-full py-3 text-xs uppercase tracking-widest">
-              Ir para tickets
-            </button>
-          </div>
-        </div>
-      </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className="ui-surface-soft p-5">
@@ -1916,7 +2303,10 @@ function DashboardPage() {
                   <p className="text-sm font-semibold line-clamp-1">{t.title}</p>
                   <p className="text-[11px] text-muted-foreground">#{t.id} • {t.solicitor_sector_name} → {t.executor_sector_name || 'Não atribuído'}</p>
                 </div>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-primary/10 text-primary">
+                <span
+                  className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border"
+                  style={getDashboardStatusStyle(t.status_name, t.status_id)}
+                >
                   {t.status_name}
                 </span>
               </div>
@@ -1953,11 +2343,7 @@ function DashboardPage() {
 
 function AdminPage() {
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h2 className="text-3xl font-bold tracking-tight">Administração</h2>
-        <p className="text-muted-foreground">Gerencie setores e usuários do tenant.</p>
-      </div>
+    <div className="flex flex-col gap-8">
       <AdminPanel />
     </div>
   );

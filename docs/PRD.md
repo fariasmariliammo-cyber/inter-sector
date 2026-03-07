@@ -19,6 +19,12 @@ Gestão 360 is a platform designed to manage and streamline communication and ta
 4. **Notifications**: Real-time or polled notifications for ticket updates and mentions, via app and e-mail.
 5. **Storage**: File attachment support for tickets and comments.
 6. **Dashboard & Navigation**: Home dashboard with key ticket metrics (by status, pending, recent, notifications) and sidebar navigation (Dashboard, Tickets, Admin for admins).
+   - Dashboard period filter must default to the last 3 months and support quick ranges: last 30 days, last 6 months, and last year.
+   - The status distribution and total tickets in dashboard must be presented in a pie chart.
+   - Dashboard must be role-specific: common users can access only the common dashboard and admins can access only the admin dashboard.
+   - Common dashboard must show only the health data of the logged-in user's sector.
+   - Admin dashboard must include a complete cross-sector view, highlighting best and worst performing sectors.
+   - In admin dashboard, the status distribution chart must support sector filter (`Todos os setores` + each tenant sector).
 
 ## Architecture
 

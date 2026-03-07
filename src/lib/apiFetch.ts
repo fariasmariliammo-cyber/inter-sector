@@ -348,6 +348,7 @@ async function handleListTickets(url: URL): Promise<Response> {
   const sectorExecutor = url.searchParams.get('sector_executor');
   const userSolicitor = url.searchParams.get('user_solicitor');
   const userExecutor = url.searchParams.get('user_executor');
+  const dashboardScope = url.searchParams.get('dashboard_scope');
   const statusIds = parseNumberList(url.searchParams.get('status_id'));
   const createdFrom = url.searchParams.get('created_from');
   const createdTo = url.searchParams.get('created_to');
@@ -370,7 +371,25 @@ async function handleListTickets(url: URL): Promise<Response> {
     .eq('tenant_id', tenantId);
 
   if (role !== 'admin' && userId) {
-    query = query.or(`solicitor_id.eq.${userId},executor_id.eq.${userId}`);
+    if (dashboardScope === 'sector') {
+      if (!sectorExecutor) return errorResponse('sector_executor is required for sector dashboard scope.', 400);
+
+      const { data: requester, error: requesterError } = await supabase
+        .from('users')
+        .select('sector_id')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (requesterError) return errorResponse(requesterError.message, 400);
+      if (!requester) return errorResponse('User not found.', 404);
+      if (String(requester.sector_id) !== String(sectorExecutor)) {
+        return errorResponse('Acesso negado para dashboard de outro setor.', 403);
+      }
+
+      query = query.eq('executor_sector_id', sectorExecutor);
+    } else {
+      query = query.or(`solicitor_id.eq.${userId},executor_id.eq.${userId}`);
+    }
   }
 
   if (sectorSolicitor) query = query.eq('solicitor_sector_id', sectorSolicitor);
@@ -383,8 +402,8 @@ async function handleListTickets(url: URL): Promise<Response> {
   if (createdTo) query = query.lte('created_at', createdTo);
 
   const { data: tickets, error } = await query
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: false })
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
     .range(offset, offset + limit - 1);
   if (error) return errorResponse(error.message, 400);
 

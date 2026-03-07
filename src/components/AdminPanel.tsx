@@ -206,38 +206,50 @@ export function AdminPanel() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-12 pb-20">
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2 text-primary font-bold uppercase tracking-widest text-xs">
-            <Shield size={14} />
-            Administração
+    <div className="max-w-6xl mx-auto space-y-10 pb-20">
+      <header className="ui-surface relative overflow-hidden p-6 md:p-8">
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/15 via-transparent to-transparent" />
+        <div className="relative flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-primary font-bold uppercase tracking-widest text-xs">
+              <Shield size={14} />
+              Administração
+            </div>
+            <h1 className="text-4xl md:text-5xl font-black tracking-tight">Painel de Controle</h1>
+            <p className="text-muted-foreground text-base md:text-lg max-w-2xl">
+              Gerencie setores, permissões e convites com clareza e controle.
+            </p>
+            <div className="flex flex-wrap gap-2 pt-2">
+              <div className="px-3 py-1.5 rounded-xl bg-muted/40 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                {sectors.length} setores
+              </div>
+              <div className="px-3 py-1.5 rounded-xl bg-muted/40 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                {users.length} usuários
+              </div>
+            </div>
           </div>
-          <h2 className="text-4xl font-black tracking-tight">Painel de Controle</h2>
-          <p className="text-muted-foreground text-lg">Gerencie a infraestrutura humana da sua organização.</p>
+
+          <AnimatePresence>
+            {feedback && <StatusMessage message={feedback.message} type={feedback.type} />}
+          </AnimatePresence>
         </div>
-        
-        <AnimatePresence>
-          {feedback && <StatusMessage message={feedback.message} type={feedback.type} />}
-        </AnimatePresence>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Sectors */}
-        <div className="lg:col-span-4 space-y-8">
+        <div className="lg:col-span-4 space-y-6">
           <section className="ui-surface p-6 space-y-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
                   <Building2 size={20} />
                 </div>
-                <h3 className="text-xl font-bold">Setores</h3>
+                <h2 className="text-lg font-black uppercase tracking-widest">Setores</h2>
               </div>
               <span className="text-xs font-mono bg-muted px-2 py-1 rounded-full text-muted-foreground">
                 {sectors.length} total
               </span>
             </div>
-            
+
             <form onSubmit={handleCreateSector} className="space-y-3">
               <div className="relative">
                 <input
@@ -248,8 +260,8 @@ export function AdminPanel() {
                   className="ui-input w-full pr-12 placeholder:text-muted-foreground/50"
                   required
                 />
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   disabled={isSubmittingSector}
                   className="ui-btn-primary absolute right-2 top-2 p-2 rounded-xl disabled:opacity-50"
                 >
@@ -258,11 +270,16 @@ export function AdminPanel() {
               </div>
             </form>
 
-            <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+            <div className="space-y-2 max-h-[420px] overflow-y-auto pr-2 custom-scrollbar">
+              {sectors.length === 0 && (
+                <div className="p-4 rounded-2xl border border-dashed text-sm text-muted-foreground">
+                  Nenhum setor cadastrado ainda.
+                </div>
+              )}
               {sectors.map((s) => (
-                <motion.div 
+                <motion.div
                   layout
-                  key={s.id} 
+                  key={s.id}
                   className="group p-4 rounded-2xl border border-border/70 bg-background/65 hover:bg-background hover:shadow-md transition-all flex justify-between items-center"
                 >
                   <div className="flex items-center gap-3">
@@ -271,12 +288,12 @@ export function AdminPanel() {
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <div className="flex items-center gap-2">
-                      <button 
+                      <button
                         onClick={(e) => handleDeleteSector(e, s.id)}
                         disabled={deletingSectorId === s.id}
                         className={`p-2 rounded-lg transition-all flex items-center gap-1 ${
-                          confirmDeleteSector === s.id 
-                            ? 'bg-destructive text-destructive-foreground px-3' 
+                          confirmDeleteSector === s.id
+                            ? 'bg-destructive text-destructive-foreground px-3'
                             : 'text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10'
                         }`}
                         title={confirmDeleteSector === s.id ? "Clique para confirmar" : "Excluir Setor"}
@@ -313,27 +330,26 @@ export function AdminPanel() {
           </section>
         </div>
 
-        {/* Right Column: Users */}
-        <div className="lg:col-span-8 space-y-8">
-          <section className="space-y-6">
-            <div className="flex items-center justify-between">
+        <div className="lg:col-span-8 space-y-6">
+          <section className="ui-surface p-6 md:p-8 space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
                   <Users size={20} />
                 </div>
-                <h3 className="text-xl font-bold">Gestão de Membros</h3>
+                <div>
+                  <h2 className="text-lg font-black uppercase tracking-widest">Gestão de Membros</h2>
+                  <p className="text-sm text-muted-foreground">Convide pessoas e defina o nível de acesso.</p>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <span className="text-xs font-mono bg-muted px-2 py-1 rounded-full text-muted-foreground">
-                  {users.length} usuários
-                </span>
-              </div>
+              <span className="text-xs font-mono bg-muted px-2 py-1 rounded-full text-muted-foreground">
+                {users.length} usuários
+              </span>
             </div>
 
-            {/* Create User Form */}
-            <form onSubmit={handleCreateUser} className="ui-surface p-8 space-y-6 relative overflow-hidden">
+            <form onSubmit={handleCreateUser} className="space-y-6 relative overflow-hidden">
               <div className="absolute top-0 left-0 w-1 h-full bg-primary/20" />
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">Nome Completo</label>
@@ -349,7 +365,7 @@ export function AdminPanel() {
                     />
                   </div>
                 </div>
-                
+
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">E-mail</label>
                   <div className="relative">
@@ -384,14 +400,18 @@ export function AdminPanel() {
                     <button
                       type="button"
                       onClick={() => setNewUser({ ...newUser, role: 'user' })}
-                      className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${newUser.role === 'user' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                      className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+                        newUser.role === 'user' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'
+                      }`}
                     >
                       Usuário
                     </button>
                     <button
                       type="button"
                       onClick={() => setNewUser({ ...newUser, role: 'admin' })}
-                      className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${newUser.role === 'admin' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                      className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+                        newUser.role === 'admin' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'
+                      }`}
                     >
                       Admin
                     </button>
@@ -399,8 +419,8 @@ export function AdminPanel() {
                 </div>
               </div>
 
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 disabled={isSubmittingUser}
                 className="ui-btn-primary w-full py-4 uppercase tracking-widest flex items-center justify-center gap-3 shadow-[0_20px_45px_-30px_rgba(var(--primary-rgb),0.75)] disabled:opacity-50"
               >
@@ -409,8 +429,7 @@ export function AdminPanel() {
               </button>
             </form>
 
-            {/* Users Table */}
-            <div className="ui-surface overflow-hidden">
+            <div className="overflow-hidden rounded-2xl border border-border/60">
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
@@ -451,12 +470,12 @@ export function AdminPanel() {
                         <td className="p-6 text-right">
                           <div className="flex flex-col items-end gap-2">
                             {u.id !== user?.id && u.role !== 'admin' && (
-                              <button 
+                              <button
                                 onClick={(e) => handleDeleteUser(e, u.id)}
                                 disabled={deletingUserId === u.id}
                                 className={`p-2 rounded-xl transition-all flex items-center gap-1 ml-auto ${
-                                  confirmDeleteUser === u.id 
-                                    ? 'bg-destructive text-destructive-foreground px-4' 
+                                  confirmDeleteUser === u.id
+                                    ? 'bg-destructive text-destructive-foreground px-4'
                                     : 'text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10'
                                 }`}
                                 title={confirmDeleteUser === u.id ? "Clique para confirmar" : "Excluir Usuário"}
