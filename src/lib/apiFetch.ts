@@ -280,8 +280,7 @@ async function handleSignup(init?: RequestInit): Promise<Response> {
   const defaultStatuses = [
     { tenant_id: tenant.id, name: 'Aberto', sequence: 1 },
     { tenant_id: tenant.id, name: 'Em Atendimento', sequence: 2 },
-    { tenant_id: tenant.id, name: 'Em Revisao', sequence: 3 },
-    { tenant_id: tenant.id, name: 'Concluido', sequence: 4 },
+    { tenant_id: tenant.id, name: 'Concluído', sequence: 3 },
   ];
 
   const { error: statusesError } = await supabase.from('statuses').insert(defaultStatuses);
@@ -350,6 +349,8 @@ async function handleListTickets(url: URL): Promise<Response> {
   const userSolicitor = url.searchParams.get('user_solicitor');
   const userExecutor = url.searchParams.get('user_executor');
   const statusIds = parseNumberList(url.searchParams.get('status_id'));
+  const createdFrom = url.searchParams.get('created_from');
+  const createdTo = url.searchParams.get('created_to');
   const limitParam = toNumber(url.searchParams.get('limit'));
   const offsetParam = toNumber(url.searchParams.get('offset'));
   const limit = Math.min(Math.max(limitParam ?? 50, 1), 200);
@@ -378,6 +379,8 @@ async function handleListTickets(url: URL): Promise<Response> {
   if (userExecutor) query = query.eq('executor_id', userExecutor);
   if (statusIds.length === 1) query = query.eq('status_id', statusIds[0]);
   if (statusIds.length > 1) query = query.in('status_id', statusIds);
+  if (createdFrom) query = query.gte('created_at', createdFrom);
+  if (createdTo) query = query.lte('created_at', createdTo);
 
   const { data: tickets, error } = await query
     .order('created_at', { ascending: false })

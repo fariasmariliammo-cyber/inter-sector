@@ -159,6 +159,26 @@
   .ui-chip {
     @apply inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-primary;
   }
+
+  .kanban-board {
+    @apply grid min-w-[720px] overflow-hidden rounded-[2rem] border border-border/70 bg-card/55 backdrop-blur-md sm:min-w-[840px] md:min-w-[980px] lg:min-w-0 lg:grid-cols-3;
+  }
+
+  .kanban-column {
+    @apply flex min-h-[520px] flex-col border-r border-border/60 p-4 transition-all duration-200 last:border-r-0 sm:min-h-[600px] sm:p-5;
+  }
+
+  .kanban-column-active {
+    @apply bg-primary/6;
+  }
+
+  .kanban-column-dimmed {
+    @apply opacity-72;
+  }
+
+  .kanban-dropzone {
+    @apply rounded-2xl border border-dashed border-primary/30 bg-primary/6 px-4 py-4 text-center text-sm font-semibold text-primary;
+  }
 }
 
 .markdown-body {

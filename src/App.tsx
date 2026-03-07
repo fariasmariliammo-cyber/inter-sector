@@ -17,6 +17,7 @@ const TICKETS_PAGE_SIZE = 50;
 const COMMENTS_PAGE_SIZE = 100;
 const METRICS_TICKETS_LIMIT = 200;
 const THEME_STORAGE_PREFIX = 'gestao360:theme';
+const TICKETS_VIEW_STORAGE_KEY = 'gestao360:tickets-view';
 const getThemeStorageKey = (userId?: number | null) => `${THEME_STORAGE_PREFIX}:${userId ?? 'default'}`;
 
 type AppShellContext = {
@@ -26,21 +27,42 @@ type AppShellContext = {
 
 type AuthMode = 'login' | 'register';
 type TicketFilters = {
+  period_months: string;
   sector_solicitor: string;
   sector_executor: string;
   status_ids: string[];
   search: string;
 };
+type TicketsViewMode = 'cards' | 'kanban';
 
 const isThemeValue = (value: string | null): value is 'light' | 'dark' =>
   value === 'light' || value === 'dark';
 
 const areTicketFiltersEqual = (a: TicketFilters, b: TicketFilters) =>
+  a.period_months === b.period_months &&
   a.sector_solicitor === b.sector_solicitor &&
   a.sector_executor === b.sector_executor &&
   a.search === b.search &&
   a.status_ids.length === b.status_ids.length &&
   a.status_ids.every((value, index) => value === b.status_ids[index]);
+
+const getPeriodStartIso = (months: string) => {
+  if (months === 'all') return null;
+
+  const parsedMonths = Number(months);
+  if (Number.isNaN(parsedMonths) || parsedMonths <= 0) return null;
+
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setMonth(start.getMonth() - parsedMonths);
+  return start.toISOString();
+};
+
+const getPeriodEndIso = () => {
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  return end.toISOString();
+};
 
 const fetchWithRetry = async (url: string, options?: RequestInit, retries = 3): Promise<any> => {
   try {
@@ -498,13 +520,13 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
       <motion.div 
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="ui-surface w-full max-w-2xl rounded-3xl overflow-hidden"
+        className="ui-surface flex w-full max-w-2xl max-h-[92vh] flex-col overflow-hidden rounded-[1.75rem] sm:rounded-3xl"
       >
-        <div className="p-6 border-b border-border/70 flex justify-between items-center bg-muted/35">
+        <div className="flex items-center justify-between gap-3 border-b border-border/70 bg-muted/35 p-4 sm:p-6">
           <h2 className="text-xl font-bold">Novo Ticket</h2>
           <button onClick={onClose} className="p-2 hover:bg-muted rounded-full transition-colors"><X size={20}/></button>
         </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="overflow-y-auto p-4 space-y-4 sm:p-6">
           <div>
             <label className="block text-sm font-medium mb-1">Título</label>
             <input
@@ -575,9 +597,9 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
               <input type="file" className="hidden" onChange={handleFileUpload} disabled={uploading} />
             </label>
           </div>
-          <div className="flex justify-end gap-3 pt-4">
-            <button type="button" onClick={onClose} className="ui-btn-secondary px-4 py-2">Cancelar</button>
-            <button type="submit" className="ui-btn-primary px-6 py-2">Criar Ticket</button>
+          <div className="flex flex-col-reverse gap-3 pt-4 sm:flex-row sm:justify-end">
+            <button type="button" onClick={onClose} className="ui-btn-secondary w-full px-4 py-2 sm:w-auto">Cancelar</button>
+            <button type="submit" className="ui-btn-primary w-full px-6 py-2 sm:w-auto">Criar Ticket</button>
           </div>
         </form>
       </motion.div>
@@ -783,28 +805,28 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
       <motion.div 
         initial={{ x: '100%' }}
         animate={{ x: 0 }}
-        className="ui-surface w-full max-w-3xl h-full max-h-[90vh] rounded-3xl flex flex-col overflow-hidden"
+        className="ui-surface flex h-full max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[1.75rem] sm:rounded-3xl"
       >
-        <div className="p-6 border-b bg-muted/30 flex justify-between items-start">
-          <div>
+        <div className="flex flex-col gap-4 border-b bg-muted/30 p-4 sm:flex-row sm:items-start sm:justify-between sm:p-6">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground mb-1">
               <span>#{ticket.id}</span>
               <span>•</span>
               <span>{new Date(ticket.created_at).toLocaleString()}</span>
             </div>
-            <h2 className="text-2xl font-bold tracking-tight">{ticket.title}</h2>
-              <div className="flex gap-4 mt-2 text-sm">
-                <span className="flex items-center gap-1"><UserIcon size={14}/> {ticket.solicitor_name} ({ticket.solicitor_sector_name})</span>
-                <ChevronRight size={14} className="mt-1 opacity-50"/>
-                <span className="flex items-center gap-1">
+            <h2 className="text-2xl font-bold tracking-tight break-words">{ticket.title}</h2>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm sm:gap-4">
+                <span className="flex min-w-0 items-center gap-1 break-words"><UserIcon size={14} className="shrink-0" /> {ticket.solicitor_name} ({ticket.solicitor_sector_name})</span>
+                <ChevronRight size={14} className="hidden opacity-50 sm:block"/>
+                <span className="flex min-w-0 items-center gap-1 break-words">
                   <UserIcon size={14}/> 
                   {ticket.executor_name || 'Não atribuído'} 
                   {ticket.executor_sector_name ? ` (${ticket.executor_sector_name})` : ' (Sem setor)'}
                 </span>
               </div>
           </div>
-          <div className="flex flex-col items-end gap-2">
-            <div className="flex items-center gap-2">
+          <div className="flex w-full items-start justify-between gap-3 sm:w-auto sm:flex-col sm:items-end">
+            <div className="flex items-center gap-2 self-end sm:self-auto">
               {(user?.role === 'admin' || user?.id === ticket.solicitor_id) && !isEditing && (
                 <button 
                   onClick={() => setIsEditing(true)}
@@ -822,9 +844,9 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-8">
+        <div className="flex-1 overflow-y-auto p-4 space-y-8 sm:p-6">
           {isEditing ? (
-            <div className="space-y-6 bg-muted/20 p-6 rounded-2xl border-2 border-primary/20">
+            <div className="space-y-6 rounded-2xl border-2 border-primary/20 bg-muted/20 p-4 sm:p-6">
               <div className="space-y-2">
                 <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Título do Ticket</label>
                 <input 
@@ -865,7 +887,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
                   <input type="file" className="hidden" onChange={handleEditFileUpload} />
                 </label>
               </div>
-              <div className="flex gap-3 pt-4">
+              <div className="flex flex-col-reverse gap-3 pt-4 sm:flex-row">
                 <button 
                   onClick={handleSaveEdit}
                   disabled={isSavingEdit}
@@ -924,8 +946,8 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
                     {c.content}
                   </div>
                 ) : (
-                  <div className={`max-w-[80%] p-3 rounded-2xl border ${c.user_id === user?.id ? 'bg-primary text-primary-foreground ml-auto' : 'bg-card'}`}>
-                    <div className="flex justify-between items-center gap-4 mb-1">
+                  <div className={`max-w-full p-3 rounded-2xl border sm:max-w-[80%] ${c.user_id === user?.id ? 'bg-primary text-primary-foreground ml-auto' : 'bg-card'}`}>
+                    <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
                       <span className="text-[10px] font-bold opacity-70 uppercase">{c.user_name}</span>
                       <span className="text-[10px] opacity-50">{new Date(c.created_at).toLocaleTimeString()}</span>
                     </div>
@@ -955,7 +977,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
           </div>
         </div>
 
-        <div className="p-6 border-t bg-muted/10 space-y-4">
+        <div className="border-t bg-muted/10 p-4 space-y-4 sm:p-6">
           {nextStatus && (user?.id === ticket.executor_id || user?.role === 'admin') && (
             <button onClick={handleNextStatus} className="ui-btn-primary w-full py-3 flex items-center justify-center gap-2">
               Mudar para: {nextStatus.name} <ChevronRight size={18}/>
@@ -983,10 +1005,10 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
                 value={newComment}
                 onChange={onCommentChange}
                 placeholder="Digite seu comentário... Use @ para mencionar"
-                className="ui-input w-full pr-24 resize-none"
+                className="ui-input w-full resize-none pb-14 pr-4 sm:pb-3 sm:pr-24"
                 rows={2}
               />
-              <div className="absolute right-3 bottom-3 flex items-center gap-2">
+              <div className="absolute inset-x-3 bottom-3 flex items-center justify-between gap-2 sm:inset-x-auto sm:right-3 sm:left-auto sm:justify-start">
                 <label className="p-2 hover:bg-muted rounded-lg cursor-pointer transition-colors">
                   <Paperclip size={18} className={uploadingComment ? 'animate-pulse' : ''} />
                   <input type="file" className="hidden" onChange={handleCommentFileUpload} disabled={uploadingComment} />
@@ -1003,7 +1025,7 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 10 }}
-                  className="absolute bottom-full left-0 w-64 bg-card border rounded-xl shadow-2xl mb-2 overflow-hidden z-10"
+                  className="absolute bottom-full left-0 z-10 mb-2 w-full overflow-hidden rounded-xl border bg-card shadow-2xl sm:w-64"
                 >
                   <div className="p-2 text-[10px] font-bold text-muted-foreground uppercase border-b bg-muted/30">Mencionar Usuário</div>
                   {mentionUsers.map(u => (
@@ -1106,9 +1128,95 @@ function TenantNameModal({ tenantId, currentName, onUpdated }: { tenantId: numbe
   );
 }
 
+type TicketSummaryCardProps = {
+  key?: React.Key;
+  ticket: Ticket;
+  onOpen: () => void;
+  showStatusChip?: boolean;
+  draggable?: boolean;
+  dragging?: boolean;
+  dimmed?: boolean;
+  embedded?: boolean;
+  onDragStart?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDragEnd?: () => void;
+};
+
+function TicketSummaryCard({
+  ticket,
+  onOpen,
+  showStatusChip = true,
+  draggable = false,
+  dragging = false,
+  dimmed = false,
+  embedded = false,
+  onDragStart,
+  onDragEnd,
+}: TicketSummaryCardProps) {
+  return (
+    <motion.div
+      layoutId={`ticket-${ticket.id}`}
+      animate={dragging ? { rotate: 1.2, scale: 0.985, y: -2 } : { rotate: 0, scale: 1, y: 0 }}
+      transition={{ type: 'spring', stiffness: 340, damping: 26 }}
+      role="button"
+      tabIndex={0}
+      draggable={draggable}
+      onClick={onOpen}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className={`transition-all group relative overflow-hidden ${
+        embedded ? 'rounded-[1.35rem] border border-border/55 bg-background/72 p-4 shadow-none backdrop-blur-none' : 'ui-surface-soft p-5'
+      } ${
+        draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+      } ${dragging ? 'opacity-55 shadow-[0_22px_40px_-28px_rgba(var(--primary-rgb),0.75)]' : 'hover:-translate-y-0.5 hover:shadow-[0_18px_38px_-30px_rgba(var(--primary-rgb),0.55)]'} ${dimmed ? 'opacity-45 saturate-0' : ''}`}
+    >
+      {showStatusChip && (
+        <div className="absolute top-0 right-0 p-4">
+          <div className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+            ticket.status_name.toLowerCase().includes('conclu') ? 'bg-emerald-500/10 text-emerald-500' : 'bg-primary/10 text-primary'
+          }`}>
+            {ticket.status_name}
+          </div>
+        </div>
+      )}
+
+      <div className="mb-2 break-words text-[10px] font-mono text-muted-foreground">#{ticket.id} • {new Date(ticket.created_at).toLocaleDateString()}</div>
+      <h3 className={`font-bold mb-4 line-clamp-2 group-hover:text-primary transition-colors ${embedded ? 'text-base' : 'text-lg'}`}>{ticket.title}</h3>
+
+      <div className="space-y-3">
+        <div className="flex min-w-0 items-center gap-2 text-xs">
+          <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center font-bold shrink-0">{ticket.solicitor_name[0]}</div>
+          <span className="text-muted-foreground shrink-0">De:</span>
+          <span className="min-w-0 truncate font-medium">{ticket.solicitor_sector_name}</span>
+        </div>
+        <div className="flex min-w-0 items-center gap-2 text-xs">
+          <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold shrink-0">
+            {ticket.executor_name ? ticket.executor_name[0] : '?'}
+          </div>
+          <span className="text-muted-foreground shrink-0">Para:</span>
+          <span className="min-w-0 truncate font-medium">{ticket.executor_sector_name || 'Não atribuído'}</span>
+        </div>
+      </div>
+
+      <div className="mt-6 flex items-center justify-between gap-2 border-t pt-4">
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <MessageSquare size={14}/> <span>Ver detalhes</span>
+        </div>
+        <ChevronRight size={16} className="text-muted-foreground group-hover:translate-x-1 transition-transform"/>
+      </div>
+    </motion.div>
+  );
+}
+
 function TicketsPage() {
   const { user } = useAuth();
   const { notifications, markAsRead } = useOutletContext<AppShellContext>();
+  const toast = useToast();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [ticketsHasMore, setTicketsHasMore] = useState(false);
   const [ticketsLoadingMore, setTicketsLoadingMore] = useState(false);
@@ -1117,9 +1225,24 @@ function TicketsPage() {
   const [showNewTicket, setShowNewTicket] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
   const [showStatusFilter, setShowStatusFilter] = useState(false);
+  const [viewMode, setViewMode] = useState<TicketsViewMode>(() => {
+    const storedView = localStorage.getItem(TICKETS_VIEW_STORAGE_KEY);
+    return storedView === 'cards' ? 'cards' : 'kanban';
+  });
+  const [draggedTicketId, setDraggedTicketId] = useState<number | null>(null);
+  const [dragOverStatusId, setDragOverStatusId] = useState<number | null>(null);
+  const [updatingTicketId, setUpdatingTicketId] = useState<number | null>(null);
   const statusFilterRef = useRef<HTMLDivElement | null>(null);
+  const periodOptions = [
+    { value: '1', label: 'Ultimo mes' },
+    { value: '3', label: 'Ultimos 3 meses' },
+    { value: '6', label: 'Ultimos 6 meses' },
+    { value: '12', label: 'Ultimos 12 meses' },
+    { value: 'all', label: 'Todo o periodo' }
+  ];
 
   const createDefaultTicketFilters = (sectorId?: number, availableStatuses: Status[] = []): TicketFilters => ({
+    period_months: '3',
     sector_solicitor: '',
     sector_executor: sectorId ? String(sectorId) : '',
     status_ids: availableStatuses
@@ -1137,6 +1260,8 @@ function TicketsPage() {
     .filter((status) => filters.status_ids.includes(String(status.id)))
     .sort((a, b) => a.sequence - b.sequence)
     .map((status) => status.name);
+  const visibleStatuses = [...statuses].sort((a, b) => a.sequence - b.sequence);
+  const draggedTicket = tickets.find((ticket) => ticket.id === draggedTicketId) || null;
 
   useEffect(() => {
     const onClickOutside = (event: MouseEvent) => {
@@ -1152,14 +1277,23 @@ function TicketsPage() {
   }, []);
 
   useEffect(() => {
+    localStorage.setItem(TICKETS_VIEW_STORAGE_KEY, viewMode);
+  }, [viewMode]);
+
+  useEffect(() => {
     setFilters((current) => {
       const currentMatchesDefaultQueue =
+        current.period_months === '3' &&
         current.sector_executor === (user?.sector_id ? String(user.sector_id) : '') &&
         current.sector_solicitor === '' &&
         current.search === '' &&
         current.status_ids.length <= 2;
 
-      if (currentMatchesDefaultQueue || areTicketFiltersEqual(current, defaultFilters)) {
+      if (areTicketFiltersEqual(current, defaultFilters)) {
+        return current;
+      }
+
+      if (currentMatchesDefaultQueue) {
         return defaultFilters;
       }
 
@@ -1180,6 +1314,11 @@ function TicketsPage() {
       sector_executor: filters.sector_executor,
       search: filters.search,
     });
+    const createdFrom = getPeriodStartIso(filters.period_months);
+    if (createdFrom) {
+      params.set('created_from', createdFrom);
+      params.set('created_to', getPeriodEndIso());
+    }
     if (filters.status_ids.length > 0) {
       params.set('status_id', filters.status_ids.join(','));
     }
@@ -1197,11 +1336,78 @@ function TicketsPage() {
     }
   };
 
+  const canManipulateTicket = (ticket: Ticket) =>
+    user?.role === 'admin' ||
+    ticket.executor_id === user?.id ||
+    (!ticket.executor_id && ticket.executor_sector_id === user?.sector_id);
+
+  const canDropTicketOnStatus = (ticket: Ticket | null, status: Status) => {
+    if (!ticket) return false;
+    if (!canManipulateTicket(ticket)) return false;
+    if (ticket.status_id === status.id) return false;
+    if (user?.role === 'admin') return true;
+    return status.sequence === ticket.status_sequence + 1;
+  };
+
+  const moveTicketToStatus = async (ticket: Ticket, status: Status) => {
+    if (!canManipulateTicket(ticket)) {
+      toast.warning('Você só pode mover tickets atribuídos a você ou sem executor do seu setor.');
+      return;
+    }
+
+    if (user?.role !== 'admin' && status.sequence !== ticket.status_sequence + 1) {
+      toast.warning('A progressão continua linear: mova o ticket apenas para a próxima coluna.');
+      return;
+    }
+
+    setUpdatingTicketId(ticket.id);
+
+    try {
+      const res = await apiFetch(`/api/tickets/${ticket.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status_id: status.id, user_id: user?.id, role: user?.role }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        toast.error(data.error || 'Não foi possível mover o ticket.');
+        return;
+      }
+
+      setTickets((current) =>
+        current.map((item) =>
+          item.id === ticket.id
+            ? { ...item, status_id: status.id, status_name: status.name, status_sequence: status.sequence }
+            : item,
+        ),
+      );
+      toast.success(`Ticket movido para ${status.name}.`);
+      fetchTickets();
+    } catch (error) {
+      console.error('Failed to move ticket:', error);
+      toast.error('Não foi possível mover o ticket.');
+    } finally {
+      setUpdatingTicketId(null);
+      setDraggedTicketId(null);
+      setDragOverStatusId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!user?.tenant_id) {
+      setSectors([]);
+      setStatuses([]);
+      return;
+    }
+
+    fetchWithRetry(`/api/sectors?tenant_id=${user.tenant_id}`).then(setSectors).catch(console.error);
+    fetchWithRetry(`/api/statuses?tenant_id=${user.tenant_id}`).then(setStatuses).catch(console.error);
+  }, [user?.tenant_id]);
+
   useEffect(() => {
     if (user) {
       fetchTickets();
-      fetchWithRetry(`/api/sectors?tenant_id=${user?.tenant_id}`).then(setSectors).catch(console.error);
-      fetchWithRetry(`/api/statuses?tenant_id=${user?.tenant_id}`).then(setStatuses).catch(console.error);
     } else {
       setTickets([]);
       setTicketsHasMore(false);
@@ -1209,27 +1415,65 @@ function TicketsPage() {
   }, [user, filters]);
 
   return (
-    <div className="relative">
-      <div className="flex flex-col gap-6">
+    <div className="relative min-w-0">
+      <div className="flex min-w-0 flex-col gap-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-3xl font-bold tracking-tight">Tickets</h2>
-            <p className="text-muted-foreground">Priorize, filtre e acompanhe demandas intersetoriais de {user?.tenant_name}</p>
+          <div className="min-w-0">
+            <h2 className="text-3xl font-bold tracking-tight break-words">Tickets</h2>
+            <p className="text-muted-foreground break-words">Priorize, filtre e acompanhe demandas intersetoriais de {user?.tenant_name}</p>
             {user?.sector_name && (
-              <p className="mt-2 text-xs font-bold uppercase tracking-[0.22em] text-primary">
+              <p className="mt-2 break-words text-xs font-bold uppercase tracking-[0.16em] text-primary sm:tracking-[0.22em] [overflow-wrap:anywhere]">
                 Fila inicial: setor executor {user.sector_name}
               </p>
             )}
           </div>
-          <button 
-            onClick={() => setShowNewTicket(true)}
-            className="ui-btn-primary px-6 py-3 flex items-center justify-center gap-2 shadow-[0_20px_45px_-28px_rgba(var(--primary-rgb),0.72)] w-full md:w-auto"
-          >
-            <Plus size={20}/> Novo Ticket
-          </button>
+          <div className="flex w-full min-w-0 flex-col gap-3 md:w-auto md:flex-row md:items-center">
+            <div className="inline-grid w-full max-w-full grid-cols-2 overflow-hidden rounded-2xl border border-border/70 bg-card/65 p-1 backdrop-blur-sm md:w-auto">
+              <button
+                type="button"
+                onClick={() => setViewMode('cards')}
+                className={`w-full rounded-xl px-3 py-2 text-sm font-bold transition-colors sm:px-4 ${
+                  viewMode === 'cards' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Cards
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('kanban')}
+                className={`w-full rounded-xl px-3 py-2 text-sm font-bold transition-colors sm:px-4 ${
+                  viewMode === 'kanban' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Kanban
+              </button>
+            </div>
+            <button 
+              onClick={() => setShowNewTicket(true)}
+              className="ui-btn-primary flex w-full items-center justify-center gap-2 px-4 py-3 text-sm shadow-[0_20px_45px_-28px_rgba(var(--primary-rgb),0.72)] sm:px-6 md:w-auto"
+            >
+              <Plus size={20} className="shrink-0" />
+              <span className="truncate">Novo Ticket</span>
+            </button>
+          </div>
         </div>
 
-        <div className="ui-surface-soft grid grid-cols-1 md:grid-cols-5 gap-3 p-4">
+        {viewMode === 'kanban' && (
+          <div className="rounded-2xl border border-primary/15 bg-primary/8 px-4 py-3 text-sm text-muted-foreground break-words">
+            Arraste o ticket para outra coluna para atualizar o status. As 3 colunas do fluxo ficam sempre visíveis; o filtro de status apenas decide quais tickets aparecem dentro de cada uma.
+          </div>
+        )}
+
+        <div className="ui-surface-soft grid min-w-0 grid-cols-1 gap-3 p-3 sm:p-4 md:grid-cols-6">
+          <select
+            className="ui-select text-sm md:col-span-2"
+            value={filters.period_months}
+            onChange={e => setFilters({...filters, period_months: e.target.value})}
+          >
+            {periodOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
           <select
             className="ui-select text-sm"
             value={filters.sector_solicitor}
@@ -1267,7 +1511,7 @@ function TicketsPage() {
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 8 }}
-                  className="absolute left-0 top-full z-20 mt-2 w-full min-w-[240px] rounded-2xl border border-border/75 bg-card/98 p-2 shadow-2xl backdrop-blur-xl"
+                  className="absolute left-0 top-full z-20 mt-2 w-full min-w-0 rounded-2xl border border-border/75 bg-card/98 p-2 shadow-2xl backdrop-blur-xl sm:min-w-[240px]"
                 >
                   <div className="border-b border-border/70 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
                     Status visiveis
@@ -1327,14 +1571,14 @@ function TicketsPage() {
             type="button"
             disabled={!hasActiveFilters}
             onClick={() => setFilters(defaultFilters)}
-            className="ui-btn-secondary h-full disabled:opacity-45"
+            className="ui-btn-secondary inline-flex h-auto w-full items-center justify-center text-center disabled:opacity-45 md:h-full"
           >
             Limpar filtros
           </button>
         </div>
 
         {/* Persistent Notifications Popups */}
-        <div className="fixed bottom-8 right-8 z-50 flex flex-col gap-4 w-80">
+        <div className="fixed inset-x-4 bottom-4 z-50 flex flex-col gap-4 sm:inset-x-auto sm:right-8 sm:bottom-8 sm:w-80">
           <AnimatePresence>
             {notifications.filter(n => n.is_persistent).map(n => (
               <motion.div
@@ -1354,50 +1598,108 @@ function TicketsPage() {
           </AnimatePresence>
         </div>
 
-        {/* Tickets Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {tickets.map(t => (
-            <motion.div
-              layoutId={`ticket-${t.id}`}
-              key={t.id}
-              onClick={() => setSelectedTicketId(t.id)}
-              className="ui-surface-soft p-6 hover:-translate-y-1 hover:shadow-[0_20px_44px_-30px_rgba(var(--primary-rgb),0.7)] transition-all cursor-pointer group relative overflow-hidden"
-            >
-              <div className="absolute top-0 right-0 p-4">
-                <div className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                  t.status_sequence === 4 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-primary/10 text-primary'
-                }`}>
-                  {t.status_name}
-                </div>
-              </div>
-              
-              <div className="text-[10px] font-mono text-muted-foreground mb-2">#{t.id} • {new Date(t.created_at).toLocaleDateString()}</div>
-              <h3 className="text-lg font-bold mb-4 line-clamp-1 group-hover:text-primary transition-colors">{t.title}</h3>
-              
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-xs">
-                  <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center font-bold">{t.solicitor_name[0]}</div>
-                  <span className="text-muted-foreground">De:</span>
-                  <span className="font-medium">{t.solicitor_sector_name}</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs">
-                  <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold">
-                    {t.executor_name ? t.executor_name[0] : '?'}
-                  </div>
-                  <span className="text-muted-foreground">Para:</span>
-                  <span className="font-medium">{t.executor_sector_name || 'Não atribuído'}</span>
-                </div>
-              </div>
+        {viewMode === 'cards' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {tickets.map((ticket) => (
+              <TicketSummaryCard
+                key={ticket.id}
+                ticket={ticket}
+                onOpen={() => setSelectedTicketId(ticket.id)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="min-w-0 overflow-x-auto pb-2">
+            <div className="kanban-board">
+            {visibleStatuses.map((status) => {
+              const columnTickets = tickets.filter((ticket) => ticket.status_id === status.id);
+              const statusIsSelected = filters.status_ids.length === 0 || filters.status_ids.includes(String(status.id));
+              const isActiveDropZone = dragOverStatusId === status.id && canDropTicketOnStatus(draggedTicket, status);
 
-              <div className="mt-6 pt-4 border-t flex justify-between items-center">
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <MessageSquare size={14}/> <span>Ver detalhes</span>
-                </div>
-                <ChevronRight size={16} className="text-muted-foreground group-hover:translate-x-1 transition-transform"/>
-              </div>
-            </motion.div>
-          ))}
-        </div>
+              return (
+                <motion.div
+                  key={status.id}
+                  onDragOver={(event) => {
+                    if (!canDropTicketOnStatus(draggedTicket, status)) return;
+                    event.preventDefault();
+                    setDragOverStatusId(status.id);
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverStatusId === status.id) setDragOverStatusId(null);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    if (!draggedTicket || !canDropTicketOnStatus(draggedTicket, status)) {
+                      setDragOverStatusId(null);
+                      return;
+                    }
+                    moveTicketToStatus(draggedTicket, status);
+                  }}
+                  animate={isActiveDropZone ? { backgroundColor: 'rgba(15, 118, 110, 0.06)' } : { backgroundColor: 'rgba(0, 0, 0, 0)' }}
+                  transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+                  className={`kanban-column ${isActiveDropZone ? 'kanban-column-active' : ''} ${!statusIsSelected ? 'kanban-column-dimmed' : ''}`}
+                >
+                  <div className="mb-4 flex items-center justify-between border-b border-border/60 pb-4">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Status</p>
+                      <h3 className="mt-1 text-lg font-bold">{status.name}</h3>
+                    </div>
+                    <div className="rounded-full border border-border/60 bg-background/55 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                      {columnTickets.length}
+                    </div>
+                  </div>
+
+                  <div className="flex-1 space-y-3">
+                    {isActiveDropZone && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 8 }}
+                        className="kanban-dropzone"
+                      >
+                        Solte aqui para mover para {status.name}
+                      </motion.div>
+                    )}
+
+                    {!statusIsSelected && (
+                      <div className="rounded-2xl border border-dashed border-border/75 bg-background/45 px-4 py-4 text-center text-sm text-muted-foreground">
+                        Coluna mantida visível, mas os tickets deste status estão ocultos pelo filtro atual.
+                      </div>
+                    )}
+
+                    {columnTickets.map((ticket) => (
+                      <TicketSummaryCard
+                        key={ticket.id}
+                        ticket={ticket}
+                        showStatusChip={false}
+                        embedded
+                        draggable={canManipulateTicket(ticket) && updatingTicketId !== ticket.id}
+                        dragging={draggedTicketId === ticket.id || updatingTicketId === ticket.id}
+                        dimmed={!statusIsSelected}
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = 'move';
+                          setDraggedTicketId(ticket.id);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedTicketId(null);
+                          setDragOverStatusId(null);
+                        }}
+                        onOpen={() => setSelectedTicketId(ticket.id)}
+                      />
+                    ))}
+
+                    {columnTickets.length === 0 && statusIsSelected && (
+                      <div className="rounded-2xl border border-dashed border-border/75 bg-background/45 px-4 py-8 text-center text-sm text-muted-foreground">
+                        Nenhum ticket nesta coluna.
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
+            </div>
+          </div>
+        )}
 
         {tickets.length > 0 && ticketsHasMore && (
           <div className="mt-2 flex justify-center">
@@ -1485,12 +1787,18 @@ function DashboardPage() {
     acc[t.status_id] = (acc[t.status_id] || 0) + 1;
     return acc;
   }, {});
+  const doneStatusIds = statuses
+    .filter((status) => status.name.toLowerCase().includes('conclu'))
+    .map((status) => status.id);
+  const highestStatusSequence = statuses.reduce((max, status) => Math.max(max, status.sequence), 0);
   const openCount = tickets.filter(t => t.status_sequence === 1).length;
   const inProgressCount = tickets.filter(t => t.status_sequence === 2).length;
-  const inReviewCount = tickets.filter(t => t.status_sequence === 3).length;
-  const doneCount = tickets.filter(t => t.status_sequence === 4).length;
+  const doneCount = tickets.filter((ticket) => doneStatusIds.includes(ticket.status_id)).length;
   const withoutExecutor = tickets.filter(t => !t.executor_sector_id).length;
-  const myQueue = tickets.filter(t => t.executor_id === user?.id && t.status_sequence < 4).length;
+  const myQueue = tickets.filter((ticket) => ticket.executor_id === user?.id && !doneStatusIds.includes(ticket.status_id)).length;
+  const sectorQueue = tickets.filter(
+    (ticket) => ticket.executor_sector_id === user?.sector_id && !doneStatusIds.includes(ticket.status_id)
+  ).length;
 
   const statusBreakdown = [...statuses]
     .sort((a, b) => a.sequence - b.sequence)
@@ -1542,7 +1850,7 @@ function DashboardPage() {
         <MetricCard title="Total de tickets" value={total} subtitle={`Últimos ${Math.min(total, METRICS_TICKETS_LIMIT)} carregados`} icon={<LayoutGrid size={18} />} />
         <MetricCard title="Em aberto" value={openCount} subtitle="Aguardando início" icon={<Clock size={18} />} />
         <MetricCard title="Em andamento" value={inProgressCount} subtitle="Em atendimento" icon={<AlertCircle size={18} />} />
-        <MetricCard title="Concluídos" value={doneCount} subtitle="Finalizados" icon={<CheckCircle2 size={18} />} />
+        <MetricCard title="Concluídos" value={doneCount} subtitle={`Etapa final (${highestStatusSequence || 3})`} icon={<CheckCircle2 size={18} />} />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -1583,8 +1891,8 @@ function DashboardPage() {
               <p className="text-xl font-black">{withoutExecutor}</p>
             </div>
             <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">Em revisão</p>
-              <p className="text-xl font-black">{inReviewCount}</p>
+              <p className="text-sm text-muted-foreground">Na fila do meu setor</p>
+              <p className="text-xl font-black">{sectorQueue}</p>
             </div>
             <button onClick={() => navigate('/tickets')} className="ui-btn-secondary w-full py-3 text-xs uppercase tracking-widest">
               Ir para tickets
@@ -1827,8 +2135,7 @@ function AppShell() {
                 <Menu size={20} />
               </button>
               <div>
-                <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Painel</p>
-                <p className="text-lg font-bold tracking-tight">{pageTitle}</p>
+                <p className="text-lg font-bold tracking-tight">Gestão 360</p>
               </div>
             </div>
 
@@ -1845,7 +2152,7 @@ function AppShell() {
                     </span>
                   )}
                 </button>
-                <div className={`absolute right-0 top-full mt-2 w-80 bg-card/98 border border-border/75 rounded-2xl shadow-2xl transition-all z-50 overflow-hidden ${
+                <div className={`absolute right-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border/75 bg-card/98 shadow-2xl transition-all sm:w-80 ${
                   showNotificationsPanel ? 'opacity-100 visible translate-y-0' : 'opacity-0 invisible -translate-y-1'
                 }`}>
                   <div className="p-4 border-b bg-muted/30 font-bold text-sm">Notificações</div>
