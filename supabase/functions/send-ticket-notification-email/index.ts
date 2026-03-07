@@ -80,7 +80,11 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = getRequiredEnv("SUPABASE_URL");
   const supabaseAnonKey = getRequiredEnv("SUPABASE_ANON_KEY");
-  const supabaseServiceRoleKey = getRequiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+  const supabaseServiceRoleKey =
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SERVICE_ROLE_KEY");
+  if (!supabaseServiceRoleKey) {
+    throw new Error("Missing required env: SUPABASE_SERVICE_ROLE_KEY or SERVICE_ROLE_KEY");
+  }
   const sendgridApiKey = getRequiredEnv("SENDGRID_API_KEY");
   const sendgridFromEmail = getRequiredEnv("SENDGRID_FROM_EMAIL");
   const sendgridFromName = Deno.env.get("SENDGRID_FROM_NAME") || "Gestao 360";
