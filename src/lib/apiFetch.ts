@@ -4,6 +4,10 @@ type JsonMap = Record<string, any>;
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -30,10 +34,6 @@ function parseNumberList(value: string | null): number[] {
     .filter((part) => !Number.isNaN(part));
 }
 
-function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
-
 function formatTicket(ticket: any): any {
   return {
     ...ticket,
@@ -43,6 +43,31 @@ function formatTicket(ticket: any): any {
     executor_sector_name: ticket?.executor_sector_name?.name,
     status_name: ticket?.status_name?.name,
     status_sequence: ticket?.status_sequence?.sequence,
+  };
+}
+
+function formatUserRow(user: any): JsonMap {
+  return {
+    ...user,
+    sector_name: user?.sector_name?.name,
+    tenant_name: user?.tenant_name?.name,
+  };
+}
+
+function buildFallbackUser(email: string, authUser?: any): JsonMap {
+  const cleanEmail = normalizeEmail(email);
+  const displayName =
+    String(authUser?.user_metadata?.full_name || authUser?.user_metadata?.name || cleanEmail.split('@')[0] || 'Usuario').trim() ||
+    'Usuario';
+
+  return {
+    id: 0,
+    tenant_id: 0,
+    sector_id: 0,
+    name: displayName,
+    email: cleanEmail,
+    role: 'user',
+    theme: 'light',
   };
 }
 
@@ -253,19 +278,29 @@ async function handleLogin(init?: RequestInit): Promise<Response> {
     .maybeSingle();
 
   if (!user) {
-    await supabase.auth.signOut();
-    return errorResponse(
-      'Erro de Perfil: Usuario autenticado, mas seu perfil nao foi encontrado. Entre em contato com o suporte.',
-      401,
-      { code: 'PROFILE_NOT_FOUND' },
-    );
+    return jsonResponse(buildFallbackUser(profileEmail, authData.user));
   }
 
-  return jsonResponse({
-    ...user,
-    sector_name: user?.sector_name?.name,
-    tenant_name: user?.tenant_name?.name,
+  return jsonResponse(formatUserRow(user));
+}
+
+async function handleCreateTenant(init?: RequestInit): Promise<Response> {
+  const { name } = await parseJsonBody(init);
+  const cleanName = typeof name === 'string' ? name.trim() : '';
+
+  if (!cleanName) {
+    return errorResponse('Nome da empresa e obrigatorio.', 400);
+  }
+
+  const { data, error } = await supabase.rpc('create_tenant_for_authenticated_user', {
+    p_name: cleanName,
   });
+
+  if (error || !data) {
+    return errorResponse(error?.message || 'Erro ao criar empresa.', 500);
+  }
+
+  return jsonResponse({ success: true, user: data });
 }
 
 async function handleSignup(init?: RequestInit): Promise<Response> {
@@ -1022,6 +1057,10 @@ export async function apiFetch(input: string, init?: RequestInit): Promise<Respo
 
     if (pathname === '/api/auth/signup' && method === 'POST') {
       return handleSignup(init);
+    }
+
+    if (pathname === '/api/tenants' && method === 'POST') {
+      return handleCreateTenant(init);
     }
 
     if (pathname === '/api/sectors' && method === 'GET') {

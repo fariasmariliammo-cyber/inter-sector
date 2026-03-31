@@ -536,7 +536,12 @@ function TicketModal({ onClose, onCreated }: { onClose: () => void, onCreated: (
   };
 
   useEffect(() => {
-    apiFetch(`/api/sectors?tenant_id=${user?.tenant_id}`).then(res => res.json()).then(setSectors);
+    if (!user?.tenant_id) {
+      setSectors([]);
+      return;
+    }
+
+    apiFetch(`/api/sectors?tenant_id=${user.tenant_id}`).then(res => res.json()).then(setSectors);
   }, [user]);
 
   useEffect(() => {
@@ -1113,32 +1118,39 @@ function TicketDetail({ ticketId, onClose }: { ticketId: number, onClose: () => 
   );
 }
 
-function TenantNameModal({ tenantId, currentName, onUpdated }: { tenantId: number, currentName: string, onUpdated: (newName: string) => void }) {
-  const { user } = useAuth();
+function TenantSetupModal({ onSaved }: { onSaved: (updatedUser: User) => void }) {
   const toast = useToast();
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || name === currentName) return;
+    if (!name.trim()) return;
+
     setLoading(true);
     try {
-      const res = await apiFetch(`/api/tenants/${tenantId}`, {
-        method: 'PATCH',
+      const res = await apiFetch('/api/tenants', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, admin_id: user?.id }),
+        body: JSON.stringify({ name }),
       });
+
       if (res.ok) {
-        toast.success('Nome da empresa atualizado com sucesso.');
-        onUpdated(name);
+        const data = await res.json().catch(() => null);
+        const updatedUser = data?.user || null;
+
+        if (updatedUser) {
+          onSaved(updatedUser);
+        }
+
+        toast.success('Empresa criada com sucesso.');
       } else {
         const data = await res.json();
-        toast.error(data.error || 'Falha ao atualizar nome da empresa.');
+        toast.error(data.error || 'Falha ao criar empresa.');
       }
     } catch (err) {
       console.error(err);
-      toast.error('Falha ao atualizar nome da empresa.');
+      toast.error('Falha ao criar empresa.');
     } finally {
       setLoading(false);
     }
@@ -1156,8 +1168,8 @@ function TenantNameModal({ tenantId, currentName, onUpdated }: { tenantId: numbe
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 text-primary mb-6">
             <Settings size={32} />
           </div>
-          <h2 className="text-3xl font-black tracking-tighter mb-2">Configure sua Empresa</h2>
-          <p className="text-muted-foreground text-sm">Para começar, informe o nome oficial da sua organização.</p>
+          <h2 className="text-3xl font-black tracking-tighter mb-2">Crie sua Empresa</h2>
+          <p className="text-muted-foreground text-sm">Para começar, informe o nome oficial da sua empresa.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -1183,7 +1195,7 @@ function TenantNameModal({ tenantId, currentName, onUpdated }: { tenantId: numbe
             disabled={loading || !name.trim()}
             className="ui-btn-primary w-full py-4 text-lg shadow-[0_22px_48px_-30px_rgba(var(--primary-rgb),0.8)] disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {loading ? 'Salvando...' : 'Confirmar e Iniciar'}
+            {loading ? 'Salvando...' : 'Criar Empresa'}
             {!loading && <ChevronRight size={20} />}
           </button>
         </form>
@@ -1411,10 +1423,16 @@ function TicketsPage() {
   }, [user?.id, user?.sector_id, statuses]);
 
   const fetchTickets = async (options?: { append?: boolean }) => {
+    if (!user?.tenant_id) {
+      setTickets([]);
+      setTicketsHasMore(false);
+      return;
+    }
+
     const offset = options?.append ? tickets.length : 0;
     const limit = TICKETS_PAGE_SIZE + 1;
     const params = new URLSearchParams({
-      tenant_id: user?.tenant_id.toString() || '',
+      tenant_id: user.tenant_id.toString(),
       user_id: user?.id.toString() || '',
       role: user?.role || '',
       limit: String(limit),
@@ -2359,24 +2377,18 @@ function AppShell() {
     return user?.theme || 'light';
   });
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [showTenantModal, setShowTenantModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showNotificationsPanel, setShowNotificationsPanel] = useState(false);
   const notificationsPanelRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    if (user && user.role === 'admin' && user.tenant_name?.startsWith('Empresa de ')) {
-      setShowTenantModal(true);
-    }
-  }, [user]);
-
-  const handleTenantUpdated = (newName: string) => {
+  const handleTenantSaved = (updatedUser: User) => {
     if (user) {
-      const updatedUser = { ...user, tenant_name: newName };
       localStorage.setItem('user', JSON.stringify(updatedUser));
       window.location.reload();
     }
   };
+
+  const showTenantSetupModal = Boolean(user && !user.tenant_id);
 
   const fetchNotifications = async () => {
     if (!user) return;
@@ -2459,11 +2471,9 @@ function AppShell() {
 
   return (
     <div className="h-screen text-foreground flex overflow-hidden">
-      {showTenantModal && user && (
-        <TenantNameModal 
-          tenantId={user.tenant_id} 
-          currentName={user.tenant_name || ''} 
-          onUpdated={handleTenantUpdated} 
+      {showTenantSetupModal && user && (
+        <TenantSetupModal
+          onSaved={handleTenantSaved}
         />
       )}
 

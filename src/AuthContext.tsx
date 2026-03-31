@@ -20,6 +20,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
+  const buildFallbackUser = (email: string, fallback?: Partial<User> | null): User => {
+    const fallbackEmail = normalizeEmail(fallback?.email || email);
+    const fallbackName =
+      String(fallback?.name || fallbackEmail.split('@')[0] || 'Usuario').trim() || 'Usuario';
+
+    return {
+      id: fallback?.id ?? 0,
+      tenant_id: fallback?.tenant_id ?? 0,
+      sector_id: fallback?.sector_id ?? 0,
+      name: fallbackName,
+      email: fallbackEmail,
+      role: fallback?.role === 'admin' ? 'admin' : 'user',
+      theme: fallback?.theme === 'dark' ? 'dark' : 'light',
+      sector_name: fallback?.sector_name,
+      tenant_name: fallback?.tenant_name,
+    };
+  };
+
   const safeGetLocalUser = () => {
     try {
       return localStorage.getItem('user');
@@ -55,40 +73,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const withTimeout = async <T,>(promise: Promise<T>, ms = 5000): Promise<T> => {
-    let timeoutId: number | undefined;
-    const timeoutPromise = new Promise<T>((_resolve, reject) => {
-      timeoutId = window.setTimeout(() => reject(new Error('Auth init timeout')), ms);
-    });
-    try {
-      return await Promise.race([promise, timeoutPromise]);
-    } finally {
-      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
-    }
-  };
-
-  const loadProfileForEmail = async (email: string): Promise<User | null> => {
-    const cleanEmail = normalizeEmail(email);
-    if (!cleanEmail) return null;
-
-    const { data, error } = await supabase
-      .from('users')
-      .select(`
-        *,
-        sector_name:sectors(name),
-        tenant_name:tenants(name)
-      `)
-      .ilike('email', cleanEmail)
-      .maybeSingle();
-
-    if (error || !data) return null;
-    return {
-      ...data,
-      sector_name: data?.sector_name?.name,
-      tenant_name: data?.tenant_name?.name,
-    };
-  };
-
   const clearLocalUser = () => {
     setUser(null);
     safeRemoveLocalUser();
@@ -103,7 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const init = async () => {
       try {
-        const { data, error } = await withTimeout(supabase.auth.getSession(), 5000);
+        const { data, error } = await supabase.auth.getSession();
         if (!active) return;
 
         if (error || !data.session) {
@@ -111,21 +95,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        const email = data.session.user.email || '';
         const savedUser = safeGetParsedLocalUser();
-        if (savedUser) {
+
+        if (savedUser && normalizeEmail(savedUser.email || '') === normalizeEmail(email)) {
           setUser(savedUser);
+          safeSetLocalUser(savedUser);
           return;
         }
 
-        const email = data.session.user.email || '';
-        const profile = await loadProfileForEmail(email);
-        if (profile) {
-          setUser(profile);
-          safeSetLocalUser(profile);
-        } else {
-          await supabase.auth.signOut();
-          clearLocalUser();
-        }
+        const fallbackUser = buildFallbackUser(email, savedUser);
+        setUser(fallbackUser);
+        safeSetLocalUser(fallbackUser);
       } catch (err) {
         console.error('Auth init failed:', err);
         clearLocalUser();
@@ -139,7 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
       try {
         if (!session) {
-          const { data } = await withTimeout(supabase.auth.getSession(), 1500);
+          const { data } = await supabase.auth.getSession();
           if (data.session) {
             return;
           }
@@ -153,16 +134,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const profile = await withTimeout(loadProfileForEmail(session.user.email || ''), 5000);
-        if (profile) {
-          setUser(profile);
-          safeSetLocalUser(profile);
-        } else {
-          const cachedUser = safeGetParsedLocalUser();
-          if (cachedUser && normalizeEmail(cachedUser.email || '') === sessionEmail) {
-            setUser(cachedUser);
-          }
+        const cachedUser = safeGetParsedLocalUser();
+        if (cachedUser && normalizeEmail(cachedUser.email || '') === sessionEmail) {
+          setUser(cachedUser);
+          safeSetLocalUser(cachedUser);
+          return;
         }
+
+        const fallbackUser = buildFallbackUser(session.user.email || '', cachedUser);
+        setUser(fallbackUser);
+        safeSetLocalUser(fallbackUser);
       } catch (err) {
         console.error('Auth state change failed:', err);
       }
